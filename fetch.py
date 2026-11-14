@@ -23,6 +23,7 @@ from bs4 import BeautifulSoup
 from bs4.element import NavigableString, Tag
 
 from config import (
+    BASE_DIR,
     DATA_DIR,
     FEEDS,
     HEADERS,
