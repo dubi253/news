@@ -1,0 +1,56 @@
+name: Fetch latest news
+
+on:
+  # schedule:
+  #   - cron: '*/30 8-20 * * *'
+  #     timezone: "Asia/Shanghai"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: news-snapshot
+  cancel-in-progress: true
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 1
+          fetch-tags: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v7.1.0
+        with:
+          python-version: '3.14'
+
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check feedparser requests beautifulsoup4 lxml
+
+      - name: Fetch news and download images
+        run: python fetch.py
+
+      - name: Publish latest snapshot only
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          tag="$(TZ=Asia/Shanghai date +%Y%m%d.%H%M)"
+          snapshot_dir="$(mktemp -d)"
+          cp -a data "$snapshot_dir/data"
+
+          git checkout --orphan news
+          git rm -rf .
+          mkdir -p data
+          cp -a "$snapshot_dir/data/." data/
+          git add -A
+          git commit --allow-empty -m "News snapshot ${tag}"
+          git push --force origin HEAD:news
+          echo "Published ${tag} to news"
