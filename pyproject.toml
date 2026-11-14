@@ -1,0 +1,14 @@
+[project]
+name = "news"
+version = "0.1.0"
+description = "Fetch categorized news with local article images."
+requires-python = ">=3.15"
+dependencies = [
+    "beautifulsoup4>=4.14,<5",
+    "feedparser>=6.0,<7",
+    "lxml>=6.0,<7",
+    "requests>=2.32,<3",
+]
+
+[tool.uv]
+package = false

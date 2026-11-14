@@ -24,16 +24,16 @@ jobs:
           fetch-depth: 1
           fetch-tags: false
 
-      - name: Set up Python
-        uses: actions/setup-python@v7.1.0
+      - name: astral-sh/setup-uv
+        uses: astral-sh/setup-uv@v10.3.3
         with:
-          python-version: '3.14'
+          python-version: '3.15'
 
       - name: Install dependencies
-        run: python -m pip install --disable-pip-version-check feedparser requests beautifulsoup4 lxml
+        run: uv sync --locked
 
       - name: Fetch news and download images
-        run: python fetch.py
+        run: uv run --locked fetch.py
 
       - name: Publish latest snapshot only
         shell: bash
