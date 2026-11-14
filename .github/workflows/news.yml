@@ -52,7 +52,7 @@ jobs:
           git rm -rf .
           mkdir -p data
           cp -a "$snapshot_dir/data/." data/
-          git add -A
+          git add data
           git commit --allow-empty -m "News snapshot ${tag}"
           git push --force origin HEAD:news
           echo "Published ${tag} to news"
