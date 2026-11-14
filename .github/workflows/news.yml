@@ -17,6 +17,8 @@ jobs:
   fetch:
     runs-on: ubuntu-latest
     timeout-minutes: 12
+    env:
+      UV_INDEX_URL: https://pypi.org/simple
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7.0.1

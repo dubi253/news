@@ -1,0 +1,35 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Coverage and profiling output
+.coverage
+.coverage.*
+htmlcov/
+*.prof
+
+# Local environment and editor files
+.env
+.env.*
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+
+# Build and packaging output
+build/
+dist/
+*.egg-info/
+
+.vscode/
+
+# Keep generated news snapshots and downloaded images tracked for publishing.
