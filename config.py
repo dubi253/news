@@ -124,12 +124,8 @@ FEEDS = (
         "https://spectrum.ieee.org/feeds/topic/semiconductors.rss",
         4,
     ),
-    FeedConfig(
-        "semiconductor",
-        "EE Times",
-        "https://www.eetimes.com/feed/",
-        4,
-    ),
+    FeedConfig("semiconductor", "Semiconductor Digest",
+           "https://www.semiconductor-digest.com/feed/", 4),
 
     # ============================================================
     # 5. Semiconductor - Chinese: 12

@@ -7,6 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: write
   contents: write
 
 concurrency:
@@ -56,3 +57,17 @@ jobs:
           git commit --allow-empty -m "News snapshot ${tag}"
           git push --force origin HEAD:news
           echo "Published ${tag} to news"
+
+      - name: Delete old workflow runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/news.yml/runs?per_page=100" \
+            --jq '.workflow_runs[].id' |
+            tail -n +11 |
+            while read -r run_id; do
+              gh run delete "$run_id"
+            done
