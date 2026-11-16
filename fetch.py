@@ -8,6 +8,7 @@ import html
 import json
 import logging
 import mimetypes
+import os
 import re
 import shutil
 from collections.abc import Mapping
@@ -45,6 +46,7 @@ SESSION.headers.update(HEADERS)
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif"}
 BLOCK_TAGS = {"blockquote", "li", "p"}
 HEADING_TAGS = {"h1", "h2", "h3", "h4", "h5", "h6"}
+GOOGLE_NEWS_HOSTS = {"news.google.com", "www.news.google.com"}
 
 
 def clean_text(value: str | None) -> str:
@@ -150,8 +152,23 @@ def html_images(value: str, base: str) -> list[str]:
     soup = BeautifulSoup(value or "", "lxml")
     result: list[str] = []
     for image in soup.find_all("img"):
-        source = image.get("src") or image.get("data-src") or image.get("data-original")
-        resolved = absolute_url(source, base)
+        sources = [
+            image.get("src"),
+            image.get("data-src"),
+            image.get("data-original"),
+            image.get("data-lazy-src"),
+        ]
+        sources.extend(
+            candidate.rsplit(" ", 1)[0]
+            for candidate in str(image.get("srcset", "")).split(",")
+            if candidate.strip()
+        )
+        for source in sources:
+            resolved = absolute_url(source, base)
+            if resolved and resolved not in result:
+                result.append(resolved)
+    for metadata in soup.find_all("meta", attrs={"property": "og:image"}):
+        resolved = absolute_url(metadata.get("content"), base)
         if resolved and resolved not in result:
             result.append(resolved)
     return result
@@ -173,21 +190,80 @@ def rss_images(entry: Mapping[str, Any], base: str) -> list[str]:
     return result
 
 
-def fetch_article(link: str) -> tuple[str, list[str]]:
+def fetch_article(link: str) -> tuple[str, list[str], str]:
     """Fetch a full article when the RSS entry is incomplete."""
     try:
         response = SESSION.get(link, timeout=TIMEOUT_SECONDS)
         response.raise_for_status()
     except requests.RequestException as exc:
         LOGGER.warning("article fetch failed %s: %s", link, exc)
-        return "", []
+        return "", [], link
 
+    resolved_link = response.url if response.url.startswith(("http://", "https://")) else link
     soup = BeautifulSoup(response.text, "lxml")
+    page_images = html_images(response.text, resolved_link)
     for tag in soup(["script", "style", "noscript", "svg", "form", "nav", "footer", "header"]):
         tag.decompose()
     article = soup.find("article") or soup.find("main") or soup
     article_html = str(article)
-    return html_to_markdown(article_html, link), html_images(article_html, link)
+    return (
+        html_to_markdown(article_html, resolved_link),
+        page_images + html_images(article_html, resolved_link),
+        resolved_link,
+    )
+
+
+def publisher_link(content_html: str, fallback: str) -> str:
+    """Extract a publisher URL embedded in a Google News RSS description."""
+    if (urlparse(fallback).hostname or "").lower() not in GOOGLE_NEWS_HOSTS:
+        return fallback
+    soup = BeautifulSoup(content_html or "", "lxml")
+    for anchor in soup.find_all("a", href=True):
+        candidate = absolute_url(anchor.get("href"), fallback)
+        if candidate and (urlparse(candidate).hostname or "").lower() not in GOOGLE_NEWS_HOSTS:
+            return candidate
+    return fallback
+
+
+def detect_language(entry: Mapping[str, Any], value: str) -> str:
+    """Return a simple ISO 639-1 language code for a news item."""
+    explicit = str(entry.get("language") or "").lower().split("-", 1)[0]
+    if explicit in {"en", "zh"}:
+        return explicit
+    cjk = len(re.findall(r"[\u3400-\u9fff]", value))
+    latin = len(re.findall(r"[A-Za-z]", value))
+    if cjk:
+        return "zh"
+    if latin:
+        return "en"
+    return "unknown"
+
+
+def translate_to_chinese(values: list[str]) -> list[str]:
+    """Translate text values with Google Cloud Translation when configured."""
+    api_key = os.getenv("GOOGLE_TRANSLATE_API_KEY")
+    if not api_key or not values:
+        return values
+    translated_values: list[str] = []
+    for value in values:
+        translated_parts: list[str] = []
+        parts = [value[index : index + 20_000] for index in range(0, len(value), 20_000)] or [""]
+        for part in parts:
+            try:
+                response = SESSION.post(
+                    "https://translation.googleapis.com/language/translate/v2",
+                    params={"key": api_key},
+                    json={"q": [part], "target": "zh-CN", "format": "text"},
+                    timeout=TIMEOUT_SECONDS,
+                )
+                response.raise_for_status()
+                translated_parts.append(str(response.json()["data"]["translations"][0]["translatedText"]))
+            except (requests.RequestException, KeyError, IndexError, TypeError, ValueError) as exc:
+                LOGGER.warning("translation failed: %s", exc)
+                translated_parts = []
+                break
+        translated_values.append("".join(translated_parts) if translated_parts else value)
+    return translated_values
 
 
 def image_extension(response: requests.Response, source: str) -> str:
@@ -261,13 +337,21 @@ def fetch_feed(feed_config: FeedConfig) -> list[dict[str, Any]]:
             continue
 
         content_html = entry_html(entry)
+        link = publisher_link(content_html, link)
         content = html_to_markdown(content_html, link)
         image_sources = rss_images(entry, link) + html_images(content_html, link)
         if len(content) < 400 or not image_sources:
-            fetched_content, fetched_images = fetch_article(link)
+            fetched_content, fetched_images, resolved_link = fetch_article(link)
             if len(fetched_content) > len(content):
                 content = fetched_content
+            if resolved_link != link and (urlparse(resolved_link).hostname or "").lower() not in GOOGLE_NEWS_HOSTS:
+                link = resolved_link
             image_sources.extend(fetched_images)
+
+        language = detect_language(entry, f"{title}\n{content}")
+        if language == "en":
+            translated = translate_to_chinese([title, content])
+            title, content = translated
 
         local_images: list[str] = []
         for image_index, source in enumerate(dict.fromkeys(image_sources)):
@@ -282,6 +366,7 @@ def fetch_feed(feed_config: FeedConfig) -> list[dict[str, Any]]:
                 "category": feed_config.category,
                 "source": feed_config.source or parsed.feed.get("title", feed_config.url),
                 "title": title,
+                "language": language,
                 "published": published_time(entry),
                 "link": link,
                 "content": content,
