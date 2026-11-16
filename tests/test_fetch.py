@@ -6,6 +6,27 @@ from config import FEEDS, FeedConfig
 
 
 class FetchTests(unittest.TestCase):
+    def test_only_selected_leiphone_feeds_are_retained(self):
+        urls = {feed.url for feed in FEEDS}
+        sources = {feed.source for feed in FEEDS}
+
+        self.assertEqual(
+            {
+                "雷峰网 - AI",
+                "雷峰网 - 顶会专区",
+                "雷峰网 - 芯片",
+            },
+            {source for source in sources if source.startswith("雷峰网")},
+        )
+        self.assertEqual(
+            {
+                "https://www.leiphone.com/feed/categoryRss/name/ai",
+                "https://www.leiphone.com/feed/categoryRss/name/private",
+                "https://www.leiphone.com/feed/categoryRss/name/chips",
+            },
+            {url for url in urls if "leiphone.com" in url},
+        )
+
     def test_only_infoq_has_a_configured_default_timezone(self):
         configured = {
             feed.source: feed.default_timezone
@@ -99,6 +120,27 @@ class FetchTests(unittest.TestCase):
         self.assertEqual(items[0]["link"], "https://publisher.test/article")
         self.assertEqual(items[0]["content"], "Full article content")
         download_image.assert_called_once_with("https://publisher.test/hero.jpg", 0)
+
+    @patch("fetch.SESSION.get")
+    def test_google_news_redirect_page_fetches_publisher_article(self, get):
+        google_response = Mock(
+            url="https://news.google.com/rss/articles/example",
+            text='<link rel="canonical" href="https://publisher.test/article">',
+        )
+        publisher_response = Mock(
+            url="https://publisher.test/article",
+            text="<html><body><p>Full publisher article content.</p></body></html>",
+        )
+        get.side_effect = [google_response, publisher_response]
+
+        content, images, link = fetch.fetch_article(
+            "https://news.google.com/rss/articles/example"
+        )
+
+        self.assertIn("Full publisher article content.", content)
+        self.assertEqual(images, [])
+        self.assertEqual(link, "https://publisher.test/article")
+        self.assertEqual(get.call_count, 2)
 
     @patch("fetch.download_image", return_value="")
     @patch(

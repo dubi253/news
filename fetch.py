@@ -293,8 +293,22 @@ def fetch_article(link: str) -> tuple[str, list[str], str]:
 
     resolved_link = response.url if response.url.startswith(("http://", "https://")) else link
     if is_google_news_url(resolved_link):
-        LOGGER.warning("Google News URL did not resolve to a publisher: %s", link)
-        return "", [], link
+        publisher = publisher_link(response.text, link)
+        if publisher == link:
+            LOGGER.warning("Google News URL did not resolve to a publisher: %s", link)
+            return "", [], link
+        try:
+            response = SESSION.get(publisher, timeout=TIMEOUT_SECONDS)
+            response.raise_for_status()
+        except requests.RequestException as exc:
+            LOGGER.warning("publisher article fetch failed %s: %s", publisher, exc)
+            return "", [], link
+        resolved_link = (
+            response.url if response.url.startswith(("http://", "https://")) else publisher
+        )
+        if is_google_news_url(resolved_link):
+            LOGGER.warning("publisher URL resolved back to Google News: %s", publisher)
+            return "", [], link
     soup = BeautifulSoup(response.text, "lxml")
     page_images = html_images(response.text, resolved_link)
     for tag in soup(["script", "style", "noscript", "svg", "form", "nav", "footer", "header"]):
@@ -313,6 +327,14 @@ def publisher_link(content_html: str, fallback: str) -> str:
     if (urlparse(fallback).hostname or "").lower() not in GOOGLE_NEWS_HOSTS:
         return fallback
     soup = BeautifulSoup(content_html or "", "lxml")
+    for tag in soup.find_all("link", rel=lambda value: value and "canonical" in value):
+        candidate = absolute_url(tag.get("href"), fallback)
+        if candidate and not is_google_news_url(candidate):
+            return candidate
+    for tag in soup.find_all("meta", attrs={"property": "og:url"}):
+        candidate = absolute_url(tag.get("content"), fallback)
+        if candidate and not is_google_news_url(candidate):
+            return candidate
     for anchor in soup.find_all("a", href=True):
         candidate = absolute_url(anchor.get("href"), fallback)
         if candidate and (urlparse(candidate).hostname or "").lower() not in GOOGLE_NEWS_HOSTS:
