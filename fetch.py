@@ -47,6 +47,15 @@ IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif"}
 BLOCK_TAGS = {"blockquote", "li", "p"}
 HEADING_TAGS = {"h1", "h2", "h3", "h4", "h5", "h6"}
 GOOGLE_NEWS_HOSTS = {"news.google.com", "www.news.google.com"}
+AVATAR_MARKERS = {
+    "avatar",
+    "author",
+    "headshot",
+    "icon",
+    "logo",
+    "profile",
+    "user",
+}
 
 
 def clean_text(value: str | None) -> str:
@@ -71,10 +80,15 @@ def iso_time(value: Any) -> str:
 
 def published_time(entry: Mapping[str, Any]) -> str:
     """Return the best available publication timestamp."""
+    for key in ("published", "updated"):
+        if entry.get(key):
+            parsed = iso_time(entry[key])
+            if parsed:
+                return parsed
     for key in ("published_parsed", "updated_parsed"):
         if entry.get(key):
             return iso_time(entry[key])
-    return iso_time(entry.get("published") or entry.get("updated"))
+    return ""
 
 
 def absolute_url(value: str | None, base: str) -> str:
@@ -147,29 +161,83 @@ def html_to_markdown(value: str, base_url: str = "") -> str:
     return markdown[:MAX_CONTENT_LENGTH].strip()
 
 
+def _image_candidate_score(source: str, descriptor: str = "") -> int:
+    """Estimate an image candidate's resolution from srcset or URL metadata."""
+    match = re.search(r"(\d{2,5})w\b", descriptor)
+    if match:
+        return int(match.group(1))
+    for pattern in (r"(?:width|w|size)[=_-](\d{2,5})", r"[_-](\d{3,5})x\d{2,5}"):
+        match = re.search(pattern, source, re.IGNORECASE)
+        if match:
+            return int(match.group(1))
+    return 0
+
+
+def _media_dimension(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _is_avatar(image: Tag) -> bool:
+    """Reject common author/avatar/icon images."""
+    text = " ".join(
+        str(image.get(attribute, ""))
+        for attribute in ("alt", "class", "id", "data-testid", "aria-label")
+    ).lower()
+    return any(re.search(rf"\b{re.escape(marker)}\b", text) for marker in AVATAR_MARKERS)
+
+
 def html_images(value: str, base: str) -> list[str]:
     """Extract unique image URLs from HTML."""
     soup = BeautifulSoup(value or "", "lxml")
     result: list[str] = []
     for image in soup.find_all("img"):
-        sources = [
+        if _is_avatar(image):
+            continue
+        candidates: list[tuple[int, str]] = []
+        for source in (
             image.get("src"),
             image.get("data-src"),
             image.get("data-original"),
             image.get("data-lazy-src"),
-        ]
-        sources.extend(
-            candidate.rsplit(" ", 1)[0]
-            for candidate in str(image.get("srcset", "")).split(",")
-            if candidate.strip()
-        )
-        for source in sources:
+        ):
             resolved = absolute_url(source, base)
             if resolved and resolved not in result:
-                result.append(resolved)
+                candidates.append((_image_candidate_score(resolved), resolved))
+        picture = image.find_parent("picture")
+        if picture:
+            source_tags = picture.find_all("source")
+            for source_tag in source_tags:
+                for candidate in str(source_tag.get("srcset", "")).split(","):
+                    parts = candidate.strip().split()
+                    if not parts:
+                        continue
+                    resolved = absolute_url(parts[0], base)
+                    if resolved:
+                        candidates.append(
+                            (
+                                _image_candidate_score(
+                                    resolved, parts[1] if len(parts) > 1 else ""
+                                ),
+                                resolved,
+                            )
+                        )
+        for candidate in str(image.get("srcset", "")).split(","):
+            parts = candidate.strip().split()
+            if not parts:
+                continue
+            resolved = absolute_url(parts[0], base)
+            if resolved:
+                candidates.append(
+                    (_image_candidate_score(resolved, parts[1] if len(parts) > 1 else ""), resolved)
+                )
+        if candidates:
+            result.append(max(candidates, key=lambda item: item[0])[1])
     for metadata in soup.find_all("meta", attrs={"property": "og:image"}):
         resolved = absolute_url(metadata.get("content"), base)
-        if resolved and resolved not in result:
+        if resolved and not is_non_article_image(resolved) and resolved not in result:
             result.append(resolved)
     return result
 
@@ -178,10 +246,15 @@ def rss_images(entry: Mapping[str, Any], base: str) -> list[str]:
     """Extract unique image URLs from common RSS media fields."""
     result: list[str] = []
     for key in ("media_content", "media_thumbnail"):
+        candidates = []
         for item in entry.get(key, []) or []:
             source = absolute_url(item.get("url"), base)
-            if source and source not in result:
-                result.append(source)
+            if source:
+                width = _media_dimension(item.get("width"))
+                height = _media_dimension(item.get("height"))
+                candidates.append((width * height or width or height, source))
+        if candidates:
+            result.append(max(candidates, key=lambda item: item[0])[1])
     for enclosure in entry.get("enclosures", []) or []:
         if str(enclosure.get("type", "")).startswith("image"):
             source = absolute_url(enclosure.get("href") or enclosure.get("url"), base)
@@ -223,6 +296,11 @@ def publisher_link(content_html: str, fallback: str) -> str:
         if candidate and (urlparse(candidate).hostname or "").lower() not in GOOGLE_NEWS_HOSTS:
             return candidate
     return fallback
+
+
+def is_google_news_url(value: str) -> bool:
+    """Return whether a URL belongs to Google News rather than a publisher."""
+    return (urlparse(value).hostname or "").lower() in GOOGLE_NEWS_HOSTS
 
 
 def detect_language(entry: Mapping[str, Any], value: str) -> str:
@@ -289,8 +367,19 @@ def image_headers(source: str) -> dict[str, str]:
     }
 
 
+def is_non_article_image(source: str) -> bool:
+    """Reject common avatar, icon, logo, and tracking image URLs."""
+    path = urlparse(source).path.lower()
+    return any(
+        re.search(rf"(^|[/_.-]){re.escape(marker)}([/_.-]|$)", path)
+        for marker in AVATAR_MARKERS | {"favicon", "pixel", "tracking"}
+    )
+
+
 def download_image(source: str, index: int) -> str:
     """Download one image and return its repository-relative path."""
+    if is_non_article_image(source):
+        return ""
     try:
         response = SESSION.get(
             source,
@@ -306,8 +395,9 @@ def download_image(source: str, index: int) -> str:
         if not data or len(data) > MAX_IMAGE_BYTES:
             return ""
         digest = hashlib.sha256(data).hexdigest()[:16]
-        destination = IMAGE_DIR / f"{digest}-{index}{image_extension(response, source)}"
-        destination.write_bytes(data)
+        destination = IMAGE_DIR / f"{digest}{image_extension(response, source)}"
+        if not destination.exists():
+            destination.write_bytes(data)
         return str(destination.relative_to(BASE_DIR)).replace("\\", "/")
     except (requests.RequestException, OSError) as exc:
         LOGGER.warning("image download failed %s: %s", source, exc)
@@ -337,14 +427,15 @@ def fetch_feed(feed_config: FeedConfig) -> list[dict[str, Any]]:
             continue
 
         content_html = entry_html(entry)
+        google_news_entry = is_google_news_url(link)
         link = publisher_link(content_html, link)
         content = html_to_markdown(content_html, link)
         image_sources = rss_images(entry, link) + html_images(content_html, link)
-        if len(content) < 400 or not image_sources:
+        if google_news_entry or len(content) < 400 or not image_sources:
             fetched_content, fetched_images, resolved_link = fetch_article(link)
             if len(fetched_content) > len(content):
                 content = fetched_content
-            if resolved_link != link and (urlparse(resolved_link).hostname or "").lower() not in GOOGLE_NEWS_HOSTS:
+            if resolved_link != link and not is_google_news_url(resolved_link):
                 link = resolved_link
             image_sources.extend(fetched_images)
 
@@ -356,7 +447,7 @@ def fetch_feed(feed_config: FeedConfig) -> list[dict[str, Any]]:
         local_images: list[str] = []
         for image_index, source in enumerate(dict.fromkeys(image_sources)):
             local_path = download_image(source, image_index)
-            if local_path:
+            if local_path and local_path not in local_images:
                 local_images.append(local_path)
             if len(local_images) >= MAX_IMAGES_PER_ITEM:
                 break
