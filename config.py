@@ -187,31 +187,19 @@ FEEDS = (
            "https://www.semiconductor-digest.com/feed/", 4),
 
     # ============================================================
-    # 5. Semiconductor - Chinese: 12
+    # 5. Semiconductor - Google News: 2
     # ============================================================
     FeedConfig(
         "semiconductor",
-        "Google News - 中国晶圆制造",
-        "https://news.google.com/rss/search?q=中芯国际+OR+华虹+OR+晶合集成+OR+粤芯半导体+OR+士兰微+OR+华润微+OR+上海华力+OR+积塔半导体&hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
-        5,
+        "Google News - 晶圆代工与存储器",
+        "https://news.google.com/rss/search?q=台积电+OR+三星代工+OR+英特尔代工+OR+中芯国际+OR+联电+OR+格芯+OR+华虹+OR+高塔半导体+OR+世界先进+OR+力积电+OR+SK海力士+OR+美光+OR+铠侠+OR+长鑫存储+OR+长江存储+OR+南亚科技+OR+华邦电子+OR+三星存储&hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
+        8,
     ),
     FeedConfig(
         "semiconductor",
-        "Google News - Global Foundries and Specialty Foundries",
-        "https://news.google.com/rss/search?q=SMIC+OR+%22Hua+Hong%22+OR+Nexchip+OR+%22CanSemi%22+OR+Silan+OR+%22CR+Micro%22+OR+%22Huali+Microelectronics%22&hl=en-US&gl=US&ceid=US:en",
-        5,
-    ),
-    FeedConfig(
-        "semiconductor",
-        "Google News - Power and Analog Semiconductors",
-        "https://news.google.com/rss/search?q=英飞凌+OR+德州仪器+OR+意法半导体+OR+恩智浦+OR+安森美+OR+瑞萨+OR+亚德诺+OR+三菱电机+半导体&hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
-        5,
-    ),
-    FeedConfig(
-        "semiconductor",
-        "Google News - Global Power and Analog Semiconductors",
-        "https://news.google.com/rss/search?q=Infineon+OR+%22Texas+Instruments%22+OR+STMicroelectronics+OR+NXP+OR+onsemi+OR+Renesas+OR+%22Analog+Devices%22+OR+%22Mitsubishi+Electric%22&hl=en-US&gl=US&ceid=US:en",
-        5,
+        "Google News - Foundry and Memory",
+        "https://news.google.com/rss/search?q=TSMC+OR+%22Samsung+Foundry%22+OR+%22Intel+Foundry%22+OR+SMIC+OR+UMC+OR+GlobalFoundries+OR+%22Hua+Hong%22+OR+%22Tower+Semiconductor%22+OR+VIS+OR+PSMC+OR+X-FAB+OR+%22DB+HiTek%22+OR+%22SK+Hynix%22+OR+Micron+OR+Kioxia+OR+CXMT+OR+YMTC+OR+%22Nanya%22+OR+%22Winbond%22+OR+%22Samsung+Memory%22&hl=en-US&gl=US&ceid=US:en",
+        8,
     ),
 
     # ============================================================
@@ -230,23 +218,6 @@ FEEDS = (
         2,
     ),
 
-    # ============================================================
-    # 7. Memory - HBM / DRAM / NAND: 5
-    # ============================================================
-    FeedConfig(
-        "memory",
-        "Google News - Memory Global",
-        "https://news.google.com/rss/search?q=%22SK+Hynix%22+OR+Micron+OR+Kioxia+OR+CXMT+OR+YMTC+OR+%22Nanya%22+OR+%22Winbond%22+OR+%22Samsung+Memory%22&hl=en-US&gl=US&ceid=US:en",
-        5,
-    ),
-    FeedConfig(
-        "memory",
-        "Google News - 存储器中国",
-        "https://news.google.com/rss/search?q=SK海力士+OR+美光+OR+铠侠+OR+长鑫存储+OR+长江存储+OR+南亚科技+OR+华邦电子+OR+三星存储&hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
-        5,
-    ),
-
-    # ============================================================
     # 8. AI Compute / AI Infrastructure: 11
     # ============================================================
     FeedConfig(
@@ -263,31 +234,5 @@ FEEDS = (
     ),
 
     # ============================================================
-    # 9. International Foundry - TSMC / Samsung / Intel: 7
-    # ============================================================
-    FeedConfig(
-        "foundry_global",
-        "Google News - Global Foundries",
-        "https://news.google.com/rss/search?q=TSMC+OR+%22Samsung+Foundry%22+OR+%22Intel+Foundry%22+OR+SMIC+OR+UMC+OR+GlobalFoundries+OR+%22Hua+Hong%22&hl=en-US&gl=US&ceid=US:en",
-        5,
-    ),
-    FeedConfig(
-        "foundry_global",
-        "Google News - 中国晶圆代工",
-        "https://news.google.com/rss/search?q=台积电+OR+三星代工+OR+英特尔代工+OR+中芯国际+OR+联电+OR+格芯+OR+华虹&hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
-        5,
-    ),
-    FeedConfig(
-        "foundry_global",
-        "Google News - Specialty Foundries",
-        "https://news.google.com/rss/search?q=%22Tower+Semiconductor%22+OR+VIS+OR+PSMC+OR+X-FAB+OR+%22DB+HiTek%22&hl=en-US&gl=US&ceid=US:en",
-        5,
-    ),
-    FeedConfig(
-        "foundry_global",
-        "Google News - 中国特色工艺晶圆厂",
-        "https://news.google.com/rss/search?q=高塔半导体+OR+世界先进+OR+力积电+OR+X-FAB+OR+东部高科&hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
-        5,
-    ),
 )
 
