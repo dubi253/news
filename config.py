@@ -109,12 +109,12 @@ FEEDS = (
     ),
 
     # ---- 央视 / 澎湃（视频与深度时政补充）----
-    FeedConfig(
-        "china",
-        "央视新闻",
-        "https://plink.anyfeeder.com/cctv/news",
-        3,
-    ),
+    # FeedConfig(
+    #     "china",
+    #     "央视新闻",
+    #     "https://plink.anyfeeder.com/cctv/news",
+    #     3,
+    # ),
     FeedConfig(
         "china",
         "澎湃新闻",
@@ -193,13 +193,13 @@ FEEDS = (
         "semiconductor",
         "Google News - 晶圆代工与存储器",
         "https://news.google.com/rss/search?q=台积电+OR+三星代工+OR+英特尔代工+OR+中芯国际+OR+联电+OR+格芯+OR+华虹+OR+高塔半导体+OR+世界先进+OR+力积电+OR+SK海力士+OR+美光+OR+铠侠+OR+长鑫存储+OR+长江存储+OR+南亚科技+OR+华邦电子+OR+三星存储&hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
-        8,
+        10,
     ),
     FeedConfig(
         "semiconductor",
         "Google News - Foundry and Memory",
         "https://news.google.com/rss/search?q=TSMC+OR+%22Samsung+Foundry%22+OR+%22Intel+Foundry%22+OR+SMIC+OR+UMC+OR+GlobalFoundries+OR+%22Hua+Hong%22+OR+%22Tower+Semiconductor%22+OR+VIS+OR+PSMC+OR+X-FAB+OR+%22DB+HiTek%22+OR+%22SK+Hynix%22+OR+Micron+OR+Kioxia+OR+CXMT+OR+YMTC+OR+%22Nanya%22+OR+%22Winbond%22+OR+%22Samsung+Memory%22&hl=en-US&gl=US&ceid=US:en",
-        8,
+        10,
     ),
 
     # ============================================================
