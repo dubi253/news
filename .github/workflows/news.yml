@@ -36,6 +36,9 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked
 
+      - name: Install Chromium for Google News links
+        run: uv run playwright install chromium
+
       - name: Fetch news and download images
         run: uv run --locked fetch.py
 

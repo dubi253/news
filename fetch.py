@@ -16,10 +16,12 @@ from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any
-from urllib.parse import urljoin, urlparse
+from urllib.parse import parse_qs, urljoin, urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import feedparser
+from gnews import GNews
+from gnews.exceptions import GNewsException
 import requests
 from bs4 import BeautifulSoup
 from bs4.element import NavigableString, Tag
@@ -292,23 +294,6 @@ def fetch_article(link: str) -> tuple[str, list[str], str]:
         return "", [], link
 
     resolved_link = response.url if response.url.startswith(("http://", "https://")) else link
-    if is_google_news_url(resolved_link):
-        publisher = publisher_link(response.text, link)
-        if publisher == link:
-            LOGGER.warning("Google News URL did not resolve to a publisher: %s", link)
-            return "", [], link
-        try:
-            response = SESSION.get(publisher, timeout=TIMEOUT_SECONDS)
-            response.raise_for_status()
-        except requests.RequestException as exc:
-            LOGGER.warning("publisher article fetch failed %s: %s", publisher, exc)
-            return "", [], link
-        resolved_link = (
-            response.url if response.url.startswith(("http://", "https://")) else publisher
-        )
-        if is_google_news_url(resolved_link):
-            LOGGER.warning("publisher URL resolved back to Google News: %s", publisher)
-            return "", [], link
     soup = BeautifulSoup(response.text, "lxml")
     page_images = html_images(response.text, resolved_link)
     for tag in soup(["script", "style", "noscript", "svg", "form", "nav", "footer", "header"]):
@@ -322,29 +307,47 @@ def fetch_article(link: str) -> tuple[str, list[str], str]:
     )
 
 
-def publisher_link(content_html: str, fallback: str) -> str:
-    """Extract a publisher URL embedded in a Google News RSS description."""
-    if (urlparse(fallback).hostname or "").lower() not in GOOGLE_NEWS_HOSTS:
-        return fallback
-    soup = BeautifulSoup(content_html or "", "lxml")
-    for tag in soup.find_all("link", rel=lambda value: value and "canonical" in value):
-        candidate = absolute_url(tag.get("href"), fallback)
-        if candidate and not is_google_news_url(candidate):
-            return candidate
-    for tag in soup.find_all("meta", attrs={"property": "og:url"}):
-        candidate = absolute_url(tag.get("content"), fallback)
-        if candidate and not is_google_news_url(candidate):
-            return candidate
-    for anchor in soup.find_all("a", href=True):
-        candidate = absolute_url(anchor.get("href"), fallback)
-        if candidate and (urlparse(candidate).hostname or "").lower() not in GOOGLE_NEWS_HOSTS:
-            return candidate
-    return fallback
-
-
 def is_google_news_url(value: str) -> bool:
     """Return whether a URL belongs to Google News rather than a publisher."""
     return (urlparse(value).hostname or "").lower() in GOOGLE_NEWS_HOSTS
+
+
+def resolve_google_news_url(value: str) -> str:
+    """Resolve a Google News article URL to its publisher URL with Chromium."""
+    if not is_google_news_url(value):
+        return value
+
+    try:
+        from playwright.sync_api import Error as PlaywrightError
+        from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        LOGGER.warning("Playwright is unavailable; keeping Google News URL: %s", value)
+        return value
+
+    navigate_url = value.replace("/rss/articles/", "/articles/").split("?", 1)[0]
+    try:
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page()
+            page.goto(navigate_url, wait_until="domcontentloaded", timeout=30_000)
+            try:
+                page.wait_for_url(
+                    lambda url: "news.google.com" not in url,
+                    timeout=15_000,
+                )
+            except PlaywrightTimeoutError:
+                pass
+            resolved = page.url
+            browser.close()
+    except PlaywrightError as exc:
+        LOGGER.warning("Google News URL resolution failed %s: %s", value, exc)
+        return value
+
+    if is_google_news_url(resolved):
+        LOGGER.warning("Google News URL did not resolve to a publisher: %s", value)
+        return value
+    return resolved
 
 
 def has_read_more_marker(value: str) -> bool:
@@ -471,6 +474,10 @@ def download_image(source: str, index: int) -> str:
 def fetch_feed(feed_config: FeedConfig) -> list[dict[str, Any]]:
     """Fetch and normalize entries from one configured RSS feed."""
     LOGGER.info("fetching %s", feed_config.url)
+    parsed_url = urlparse(feed_config.url)
+    if parsed_url.hostname in GOOGLE_NEWS_HOSTS:
+        return fetch_google_news_feed(feed_config)
+
     try:
         response = SESSION.get(feed_config.url, timeout=TIMEOUT_SECONDS)
         response.raise_for_status()
@@ -491,16 +498,14 @@ def fetch_feed(feed_config: FeedConfig) -> list[dict[str, Any]]:
             continue
 
         content_html = entry_html(entry)
-        google_news_entry = is_google_news_url(link)
-        link = publisher_link(content_html, link)
         content = html_to_markdown(content_html, link)
         image_sources = rss_images(entry, link) + html_images(content_html, link)
         truncated = has_read_more_marker(content_html)
-        if google_news_entry or truncated or len(content) < 400 or not image_sources:
+        if truncated or len(content) < 400 or not image_sources:
             fetched_content, fetched_images, resolved_link = fetch_article(link)
-            if fetched_content and (google_news_entry or truncated or len(fetched_content) > len(content)):
+            if fetched_content and (truncated or len(fetched_content) > len(content)):
                 content = fetched_content
-            if resolved_link != link and not is_google_news_url(resolved_link):
+            if resolved_link != link:
                 link = resolved_link
             image_sources.extend(fetched_images)
 
@@ -521,6 +526,92 @@ def fetch_feed(feed_config: FeedConfig) -> list[dict[str, Any]]:
             {
                 "category": feed_config.category,
                 "source": feed_config.source or parsed.feed.get("title", feed_config.url),
+                "title": title,
+                "language": language,
+                "published": published_time(entry, feed_config.default_timezone),
+                "link": link,
+                "content": content,
+                "images": local_images,
+            }
+        )
+    return items
+
+
+def fetch_google_news_feed(feed_config: FeedConfig) -> list[dict[str, Any]]:
+    """Fetch and normalize a Google News RSS search with GNews."""
+    query = parse_qs(urlparse(feed_config.url).query).get("q", [""])[0]
+    if not query:
+        LOGGER.warning("Google News feed has no search query: %s", feed_config.url)
+        return []
+
+    params = parse_qs(urlparse(feed_config.url).query)
+    language = params.get("hl", ["en"])[0]
+    country = params.get("gl", ["US"])[0]
+    try:
+        articles = GNews(
+            language=language,
+            country=country,
+            max_results=feed_config.limit or MAX_PER_FEED,
+        ).get_news(query)
+    except GNewsException as exc:
+        LOGGER.warning("Google News feed failed %s: %s", feed_config.url, exc)
+        return []
+
+    entries: list[dict[str, Any]] = []
+    for article in articles:
+        link = str(article.get("url", ""))
+        entries.append(
+            {
+                "title": article.get("title", ""),
+                "link": resolve_google_news_url(link),
+                "description": article.get("description", ""),
+                "published": article.get("published date", ""),
+            }
+        )
+    return normalize_entries(entries, feed_config)
+
+
+def normalize_entries(
+    entries: list[Mapping[str, Any]],
+    feed_config: FeedConfig,
+) -> list[dict[str, Any]]:
+    """Normalize already parsed RSS-like entries into news items."""
+    items: list[dict[str, Any]] = []
+    for entry in entries:
+        title = clean_text(entry.get("title"))
+        link = absolute_url(entry.get("link"), feed_config.url)
+        if not title or not link:
+            continue
+
+        content_html = entry_html(entry)
+        content = html_to_markdown(content_html, link)
+        image_sources = rss_images(entry, link) + html_images(content_html, link)
+        truncated = has_read_more_marker(content_html)
+        if truncated or len(content) < 400 or not image_sources:
+            fetched_content, fetched_images, resolved_link = fetch_article(link)
+            if fetched_content and (truncated or len(fetched_content) > len(content)):
+                content = fetched_content
+            if resolved_link != link:
+                link = resolved_link
+            image_sources.extend(fetched_images)
+
+        language = detect_language(entry, f"{title}\n{content}")
+        if language == "en":
+            translated = translate_to_chinese([title, content])
+            title, content = translated
+
+        local_images: list[str] = []
+        for image_index, source in enumerate(dict.fromkeys(image_sources)):
+            local_path = download_image(source, image_index)
+            if local_path and local_path not in local_images:
+                local_images.append(local_path)
+            if len(local_images) >= MAX_IMAGES_PER_ITEM:
+                break
+
+        items.append(
+            {
+                "category": feed_config.category,
+                "source": feed_config.source,
                 "title": title,
                 "language": language,
                 "published": published_time(entry, feed_config.default_timezone),

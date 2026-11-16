@@ -92,55 +92,37 @@ class FetchTests(unittest.TestCase):
             ["https://example.com/hero-large.jpg"],
         )
 
-    @patch("fetch.download_image", return_value="data/images/article.jpg")
-    @patch("fetch.fetch_article", return_value=("Full article content", ["https://publisher.test/hero.jpg"], "https://publisher.test/article"))
-    @patch("fetch.feedparser.parse")
-    def test_google_news_entries_fetch_publisher_article(
-        self, parse, fetch_article, download_image
+    @patch("fetch.download_image", return_value="")
+    @patch("fetch.fetch_article", return_value=("", [], "https://publisher.test/article"))
+    @patch("fetch.GNews")
+    def test_google_news_feed_uses_gnews_results(
+        self, gnews_class, fetch_article, download_image
     ):
-        parse.return_value = Mock(
-            entries=[
-                {
-                    "title": "Google result",
-                    "link": "https://news.google.com/rss/articles/example",
-                    "description": "Headline only",
-                    "published": "Mon, 16 Nov 2026 14:00:00 +0000",
-                }
-            ],
-            feed={"title": "Google News"},
+        gnews_class.return_value.get_news.return_value = [
+            {
+                "title": "Google result",
+                "description": "Headline",
+                "published date": "Mon, 16 Nov 2026 14:00:00 GMT",
+                "url": "https://publisher.test/article",
+            }
+        ]
+
+        items = fetch.fetch_feed(
+            FeedConfig(
+                "test",
+                "Google",
+                "https://news.google.com/rss/search?q=semiconductor+OR+foundry&hl=en-US&gl=US",
+                1,
+            )
         )
-        response = Mock()
-        response.content = b"<rss />"
-        response.raise_for_status.return_value = None
 
-        with patch.object(fetch.SESSION, "get", return_value=response):
-            items = fetch.fetch_feed(FeedConfig("test", "Test", "https://example.com/feed", 1))
-
-        fetch_article.assert_called_once_with("https://news.google.com/rss/articles/example")
+        gnews_class.assert_called_once_with(language="en-US", country="US", max_results=1)
+        gnews_class.return_value.get_news.assert_called_once_with(
+            "semiconductor OR foundry"
+        )
         self.assertEqual(items[0]["link"], "https://publisher.test/article")
-        self.assertEqual(items[0]["content"], "Full article content")
-        download_image.assert_called_once_with("https://publisher.test/hero.jpg", 0)
-
-    @patch("fetch.SESSION.get")
-    def test_google_news_redirect_page_fetches_publisher_article(self, get):
-        google_response = Mock(
-            url="https://news.google.com/rss/articles/example",
-            text='<link rel="canonical" href="https://publisher.test/article">',
-        )
-        publisher_response = Mock(
-            url="https://publisher.test/article",
-            text="<html><body><p>Full publisher article content.</p></body></html>",
-        )
-        get.side_effect = [google_response, publisher_response]
-
-        content, images, link = fetch.fetch_article(
-            "https://news.google.com/rss/articles/example"
-        )
-
-        self.assertIn("Full publisher article content.", content)
-        self.assertEqual(images, [])
-        self.assertEqual(link, "https://publisher.test/article")
-        self.assertEqual(get.call_count, 2)
+        self.assertEqual(items[0]["title"], "Google result")
+        fetch_article.assert_called_once_with("https://publisher.test/article")
 
     @patch("fetch.download_image", return_value="")
     @patch(

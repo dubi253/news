@@ -6,8 +6,11 @@ requires-python = ">=3.15"
 dependencies = [
     "beautifulsoup4>=4.14,<5",
     "feedparser>=6.0,<7",
+    "gnews>=0.6,<0.7",
     "lxml>=6.0,<7",
+    "playwright>=1.50,<2",
     "requests>=2.32,<3",
+    "tzdata>=2024.1",
     "ua-generator>=2.1,<3",
 ]
 
