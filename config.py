@@ -46,24 +46,28 @@ FEEDS = (
         "BBC World",
         "https://feeds.bbci.co.uk/news/world/rss.xml",
         3,
+        "Europe/London",
     ),
     FeedConfig(
         "international",
         "The Guardian World",
         "https://www.theguardian.com/world/rss",
         3,
+        "Europe/London",
     ),
     FeedConfig(
         "international",
         "德国之声中文",
         "https://rss.dw.com/rdf/rss-chi-all",
         3,
+        "Europe/Berlin",
     ),
     FeedConfig(
         "international",
         "联合早报国际",
         "https://plink.anyfeeder.com/zaobao/realtime/world",
         3,
+        "Asia/Singapore",
     ),
 
     # ============================================================
@@ -74,12 +78,14 @@ FEEDS = (
         "TechCrunch",
         "https://techcrunch.com/feed/",
         4,
+        "America/Los_Angeles",
     ),
     FeedConfig(
         "technology",
         "Ars Technica",
         "https://feeds.arstechnica.com/arstechnica/technology-lab",
         5,
+        "America/Chicago",
     ),
     FeedConfig(
         "technology",
@@ -97,18 +103,21 @@ FEEDS = (
         "MIT News - Artificial Intelligence",
         "https://news.mit.edu/rss/topic/artificial-intelligence2",
         4,
+        "America/New_York",
     ),
     FeedConfig(
         "ai",
         "雷峰网 - AI",
         "https://www.leiphone.com/feed/categoryRss/name/ai",
         4,
+        "Asia/Shanghai",
     ),
     FeedConfig(
         "ai",
         "雷峰网 - 顶会专区",
         "https://www.leiphone.com/feed/categoryRss/name/private",
         3,
+        "Asia/Shanghai",
     ),
 
     # ============================================================
@@ -119,15 +128,17 @@ FEEDS = (
         "Semiconductor Engineering",
         "https://semiengineering.com/feed/",
         10,
+        "America/Los_Angeles",
     ),
     FeedConfig(
         "semiconductor",
         "IEEE Spectrum - Semiconductors",
         "https://spectrum.ieee.org/feeds/topic/semiconductors.rss",
         4,
+        "America/New_York",
     ),
     FeedConfig("semiconductor", "Semiconductor Digest",
-           "https://www.semiconductor-digest.com/feed/", 4),
+           "https://www.semiconductor-digest.com/feed/", 4, "America/New_York"),
 
     # ============================================================
     # 5. Semiconductor - Chinese: 12
@@ -137,18 +148,21 @@ FEEDS = (
         "雷峰网 - 材料设备",
         "https://www.leiphone.com/feed/categoryRss/name/materials",
         4,
+        "Asia/Shanghai",
     ),
     FeedConfig(
         "semiconductor",
         "雷峰网 - 晶圆代工",
         "https://www.leiphone.com/feed/categoryRss/name/manufacturing",
         5,
+        "Asia/Shanghai",
     ),
     FeedConfig(
         "semiconductor",
         "雷峰网 - 封装测试",
         "https://www.leiphone.com/feed/categoryRss/name/packaging",
         3,
+        "Asia/Shanghai",
     ),
 
     # ============================================================
@@ -159,12 +173,14 @@ FEEDS = (
         "雷峰网 - 芯片设计",
         "https://www.leiphone.com/feed/categoryRss/name/chipdesign",
         5,
+        "Asia/Shanghai",
     ),
     FeedConfig(
         "eda_ip",
         "SemiWiki",
         "https://semiwiki.com/feed/",
         5,
+        "America/Chicago",
     ),
 
     # ============================================================
@@ -175,6 +191,7 @@ FEEDS = (
         "StorageNewsletter",
         "https://www.storagenewsletter.com/feed/",
         5,
+        "Europe/Paris",
     ),
 
     # ============================================================
@@ -185,12 +202,14 @@ FEEDS = (
         "SemiAnalysis",
         "https://newsletter.semianalysis.com/feed",
         7,
+        "America/Los_Angeles",
     ),
     FeedConfig(
         "ai_infra",
         "ServeTheHome",
         "https://www.servethehome.com/feed/",
         4,
+        "America/Chicago",
     ),
 
     # ============================================================
@@ -201,12 +220,14 @@ FEEDS = (
         "Samsung Newsroom - Official",
         "https://news.samsung.com/global/?feed=rss2",
         2,
+        "Asia/Seoul",
     ),
     FeedConfig(
         "foundry_global",
         "Global Foundry News - TSMC / Samsung / Intel",
         "https://news.google.com/rss/search?q=TSMC+OR+%22Samsung+Foundry%22+OR+%22Intel+Foundry%22+OR+%22Intel+18A%22&hl=en-US&gl=US&ceid=US:en",
         5,
+        "UTC",
     ),
 )
 
