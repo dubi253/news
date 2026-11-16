@@ -326,9 +326,9 @@ def resolve_google_news_url(value: str) -> str:
         return value
 
     navigate_url = value.replace("/rss/articles/", "/articles/").split("?", 1)[0]
-    try:
-        with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True, args=["--disable-http2"])
+        try:
             page = browser.new_page()
             page.goto(navigate_url, wait_until="domcontentloaded", timeout=30_000)
             try:
@@ -339,10 +339,11 @@ def resolve_google_news_url(value: str) -> str:
             except PlaywrightTimeoutError:
                 pass
             resolved = page.url
+        except PlaywrightError as exc:
+            LOGGER.warning("Google News URL resolution failed %s: %s", value, exc)
+            return value
+        finally:
             browser.close()
-    except PlaywrightError as exc:
-        LOGGER.warning("Google News URL resolution failed %s: %s", value, exc)
-        return value
 
     if is_google_news_url(resolved):
         LOGGER.warning("Google News URL did not resolve to a publisher: %s", value)
