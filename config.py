@@ -191,20 +191,20 @@ FEEDS = (
     # ============================================================
     FeedConfig(
         "semiconductor",
-        "雷峰网 - 材料设备",
-        "https://www.leiphone.com/feed/categoryRss/name/materials",
+        "Google News - 半导体材料设备",
+        "https://news.google.com/rss/search?q=%E5%8D%8A%E5%AF%BC%E4%BD%93+%E6%9D%90%E6%96%99+%E8%AE%BE%E5%A4%87&hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
         4,
     ),
     FeedConfig(
         "semiconductor",
-        "雷峰网 - 晶圆代工",
-        "https://www.leiphone.com/feed/categoryRss/name/manufacturing",
+        "Google News - 晶圆代工",
+        "https://news.google.com/rss/search?q=%E6%99%B6%E5%9C%86+%E4%BB%A3%E5%B7%A5+OR+%E5%85%88%E8%BF%9B%E5%88%B6%E7%A8%8B&hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
         5,
     ),
     FeedConfig(
         "semiconductor",
-        "雷峰网 - 封装测试",
-        "https://www.leiphone.com/feed/categoryRss/name/packaging",
+        "Google News - 先进封装测试",
+        "https://news.google.com/rss/search?q=%E5%85%88%E8%BF%9B%E5%B0%81%E8%A3%85+OR+%E5%8D%8A%E5%AF%BC%E4%BD%93+%E6%B5%8B%E8%AF%95&hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
         3,
     ),
 
