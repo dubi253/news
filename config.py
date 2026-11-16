@@ -25,7 +25,7 @@ OUTPUT_PATH = DATA_DIR / "news.json"
 
 TIMEOUT_SECONDS = 20
 MAX_PER_FEED = 8
-MAX_ITEMS = 110
+MAX_ITEMS = 120
 MAX_CONTENT_LENGTH = 50_000
 MAX_IMAGES_PER_ITEM = 3
 MAX_IMAGE_BYTES = 15 * 1024 * 1024
@@ -65,6 +65,63 @@ FEEDS = (
         "https://plink.anyfeeder.com/zaobao/realtime/world",
         3,
     ),
+        # ============================================================
+    # 2. Chinese Mainstream Media: 10
+    # ============================================================
+    # ---- 新华社 / 新华网（国家通讯社，第一优先级）----
+    FeedConfig(
+        "china",
+        "新华社新闻",
+        "https://plink.anyfeeder.com/newscn/whxw",
+        5,
+    ),
+    FeedConfig(
+        "china",
+        "财富中文网",
+        "https://feeder.co/discover/85dc2f2c3f/fortunechina-com",
+        5,
+    ),
+
+    # ---- 中国新闻网（国家二级通讯社，官方原生 RSS 最完整）----
+    FeedConfig(
+        "china",
+        "中新网即时",
+        "https://www.chinanews.com.cn/rss/scroll-news.xml",
+        3,
+    ),
+    FeedConfig(
+        "china",
+        "中新网国际",
+        "https://www.chinanews.com.cn/rss/world.xml",
+        3,
+    ),
+    FeedConfig(
+        "china",
+        "中新网时政",
+        "https://www.chinanews.com.cn/rss/china.xml",
+        3,
+    ),
+    FeedConfig(
+        "china",
+        "中新网财经",
+        "https://www.chinanews.com.cn/rss/finance.xml",
+        3,
+    ),
+
+    # ---- 央视 / 澎湃（视频与深度时政补充）----
+    FeedConfig(
+        "china",
+        "央视新闻",
+        "https://plink.anyfeeder.com/cctv/news",
+        3,
+    ),
+    FeedConfig(
+        "china",
+        "澎湃新闻",
+        "https://plink.anyfeeder.com/thepaper",
+        3,
+    ),
+
 
     # ============================================================
     # 2. General Technology: 14
@@ -156,8 +213,8 @@ FEEDS = (
     # ============================================================
     FeedConfig(
         "eda_ip",
-        "雷峰网 - 芯片设计",
-        "https://www.leiphone.com/feed/categoryRss/name/chipdesign",
+        "雷峰网 - 芯片",
+        "https://www.leiphone.com/feed/categoryRss/name/chips",
         5,
     ),
     FeedConfig(
