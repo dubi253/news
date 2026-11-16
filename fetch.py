@@ -244,20 +244,26 @@ def translate_to_chinese(values: list[str]) -> list[str]:
     api_key = os.getenv("GOOGLE_TRANSLATE_API_KEY")
     if not api_key or not values:
         return values
-    try:
-        response = SESSION.post(
-            "https://translation.googleapis.com/language/translate/v2",
-            params={"key": api_key},
-            json={"q": values, "target": "zh-CN", "format": "text"},
-            timeout=TIMEOUT_SECONDS,
-        )
-        response.raise_for_status()
-        translations = response.json()["data"]["translations"]
-        translated = [str(item["translatedText"]) for item in translations]
-        return translated if len(translated) == len(values) else values
-    except (requests.RequestException, KeyError, TypeError, ValueError) as exc:
-        LOGGER.warning("translation failed: %s", exc)
-        return values
+    translated_values: list[str] = []
+    for value in values:
+        translated_parts: list[str] = []
+        parts = [value[index : index + 20_000] for index in range(0, len(value), 20_000)] or [""]
+        for part in parts:
+            try:
+                response = SESSION.post(
+                    "https://translation.googleapis.com/language/translate/v2",
+                    params={"key": api_key},
+                    json={"q": [part], "target": "zh-CN", "format": "text"},
+                    timeout=TIMEOUT_SECONDS,
+                )
+                response.raise_for_status()
+                translated_parts.append(str(response.json()["data"]["translations"][0]["translatedText"]))
+            except (requests.RequestException, KeyError, IndexError, TypeError, ValueError) as exc:
+                LOGGER.warning("translation failed: %s", exc)
+                translated_parts = []
+                break
+        translated_values.append("".join(translated_parts) if translated_parts else value)
+    return translated_values
 
 
 def image_extension(response: requests.Response, source: str) -> str:

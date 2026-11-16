@@ -20,6 +20,7 @@ jobs:
     timeout-minutes: 12
     env:
       UV_INDEX_URL: https://pypi.org/simple
+      GOOGLE_TRANSLATE_API_KEY: ${{ secrets.GOOGLE_TRANSLATE_API_KEY }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7.0.1
