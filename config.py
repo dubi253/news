@@ -15,6 +15,7 @@ class FeedConfig:
     source: str
     url: str
     limit: int = 8
+    default_timezone: str | None = None
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -85,6 +86,7 @@ FEEDS = (
         "InfoQ 中文",
         "https://www.infoq.cn/feed.xml",
         5,
+        "Asia/Shanghai",
     ),
 
     # ============================================================

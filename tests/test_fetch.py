@@ -11,6 +11,19 @@ class FetchTests(unittest.TestCase):
 
         self.assertEqual(fetch.published_time(entry), "2026-11-16T06:00:00+00:00")
 
+    def test_published_time_uses_configured_timezone_for_naive_source(self):
+        entry = {"published": "2026-11-16T14:00:00"}
+
+        self.assertEqual(
+            fetch.published_time(entry, "Asia/Shanghai"),
+            "2026-11-16T06:00:00+00:00",
+        )
+
+    def test_published_time_does_not_assume_utc_for_naive_source(self):
+        entry = {"published": "2026-11-16T14:00:00"}
+
+        self.assertEqual(fetch.published_time(entry), "")
+
     def test_html_images_selects_largest_srcset_and_skips_avatar(self):
         value = """
         <img src="/hero-400.jpg" srcset="/hero-400.jpg 400w, /hero-1200.jpg 1200w">

@@ -17,6 +17,7 @@ from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin, urlparse
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import feedparser
 import requests
@@ -63,31 +64,43 @@ def clean_text(value: str | None) -> str:
     return re.sub(r"\s+", " ", html.unescape(value or "")).strip()
 
 
-def iso_time(value: Any) -> str:
-    """Convert RSS date values to a UTC ISO-8601 string."""
+def iso_time(value: Any, default_timezone: str | None = None) -> str:
+    """Convert an RSS date to UTC, requiring a timezone for naive values."""
     if not value:
         return ""
     try:
         if hasattr(value, "tm_year"):
-            return datetime(*value[:6], tzinfo=timezone.utc).isoformat()
-        parsed = parsedate_to_datetime(str(value))
+            parsed = datetime(*value[:6])
+        else:
+            text = str(value).strip()
+            try:
+                parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            except ValueError:
+                parsed = parsedate_to_datetime(text)
         if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
+            if not default_timezone:
+                return ""
+            parsed = parsed.replace(tzinfo=ZoneInfo(default_timezone))
         return parsed.astimezone(timezone.utc).isoformat()
-    except (TypeError, ValueError, OverflowError):
+    except (TypeError, ValueError, OverflowError, ZoneInfoNotFoundError):
         return ""
 
 
-def published_time(entry: Mapping[str, Any]) -> str:
+def published_time(
+    entry: Mapping[str, Any],
+    default_timezone: str | None = None,
+) -> str:
     """Return the best available publication timestamp."""
     for key in ("published", "updated"):
         if entry.get(key):
-            parsed = iso_time(entry[key])
+            parsed = iso_time(entry[key], default_timezone)
             if parsed:
                 return parsed
     for key in ("published_parsed", "updated_parsed"):
         if entry.get(key):
-            return iso_time(entry[key])
+            parsed = iso_time(entry[key], default_timezone)
+            if parsed:
+                return parsed
     return ""
 
 
@@ -458,7 +471,7 @@ def fetch_feed(feed_config: FeedConfig) -> list[dict[str, Any]]:
                 "source": feed_config.source or parsed.feed.get("title", feed_config.url),
                 "title": title,
                 "language": language,
-                "published": published_time(entry),
+                "published": published_time(entry, feed_config.default_timezone),
                 "link": link,
                 "content": content,
                 "images": local_images,
