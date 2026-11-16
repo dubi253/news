@@ -241,7 +241,7 @@ def detect_language(entry: Mapping[str, Any], value: str) -> str:
 
 def translate_to_chinese(values: list[str]) -> list[str]:
     """Translate text values with Google Cloud Translation when configured."""
-    api_key = os.getenv("GOOGLE_TRANSLATE_API_KEY")
+    api_key = os.getenv("GOOGLE_TRANSLATE_API_KEY", "").strip()
     if not api_key or not values:
         return values
     translated_values: list[str] = []
