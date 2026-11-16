@@ -2,10 +2,19 @@ import unittest
 from unittest.mock import Mock, patch
 
 import fetch
-from config import FeedConfig
+from config import FEEDS, FeedConfig
 
 
 class FetchTests(unittest.TestCase):
+    def test_only_infoq_has_a_configured_default_timezone(self):
+        configured = {
+            feed.source: feed.default_timezone
+            for feed in FEEDS
+            if feed.default_timezone
+        }
+
+        self.assertEqual(configured, {"InfoQ 中文": "Asia/Shanghai"})
+
     def test_published_time_preserves_source_timezone_as_utc(self):
         entry = {"published": "Mon, 16 Nov 2026 14:00:00 +0800"}
 
