@@ -33,6 +33,20 @@ class FetchTests(unittest.TestCase):
 
         self.assertEqual(fetch.published_time(entry), "")
 
+    def test_published_time_supports_rss_date_aliases(self):
+        entry = {"date": "2026-11-16T14:00:00"}
+
+        self.assertEqual(
+            fetch.published_time(entry, "Asia/Shanghai"),
+            "2026-11-16T06:00:00+00:00",
+        )
+
+    def test_read_more_marker_triggers_full_article_fetch(self):
+        content_html = (
+            "<p>" + ("A long summary. " * 40) + '</p><a href="/article">Read more</a>'
+        )
+        self.assertTrue(fetch.has_read_more_marker(content_html))
+
     def test_html_images_selects_largest_srcset_and_skips_avatar(self):
         value = """
         <img src="/hero-400.jpg" srcset="/hero-400.jpg 400w, /hero-1200.jpg 1200w">
@@ -85,6 +99,38 @@ class FetchTests(unittest.TestCase):
         self.assertEqual(items[0]["link"], "https://publisher.test/article")
         self.assertEqual(items[0]["content"], "Full article content")
         download_image.assert_called_once_with("https://publisher.test/hero.jpg", 0)
+
+    @patch("fetch.download_image", return_value="")
+    @patch(
+        "fetch.fetch_article",
+        return_value=("Full article content", [], "https://publisher.test/article"),
+    )
+    @patch("fetch.feedparser.parse")
+    def test_read_more_entries_fetch_full_article(
+        self, parse, fetch_article, download_image
+    ):
+        parse.return_value = Mock(
+            entries=[
+                {
+                    "title": "Article",
+                    "link": "https://publisher.test/article",
+                    "description": (
+                        "<p>" + ("Long summary. " * 40) + '</p><a href="/article">Read more</a>'
+                    ),
+                    "published": "Mon, 16 Nov 2026 14:00:00 +0000",
+                }
+            ],
+            feed={"title": "Publisher"},
+        )
+        response = Mock()
+        response.content = b"<rss />"
+        response.raise_for_status.return_value = None
+
+        with patch.object(fetch.SESSION, "get", return_value=response):
+            items = fetch.fetch_feed(FeedConfig("test", "Test", "https://example.com/feed", 1))
+
+        fetch_article.assert_called_once_with("https://publisher.test/article")
+        self.assertEqual(items[0]["content"], "Full article content")
 
 
 if __name__ == "__main__":

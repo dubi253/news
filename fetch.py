@@ -91,12 +91,18 @@ def published_time(
     default_timezone: str | None = None,
 ) -> str:
     """Return the best available publication timestamp."""
-    for key in ("published", "updated"):
+    for key in ("published", "updated", "date", "created", "issued"):
         if entry.get(key):
             parsed = iso_time(entry[key], default_timezone)
             if parsed:
                 return parsed
-    for key in ("published_parsed", "updated_parsed"):
+    for key in (
+        "published_parsed",
+        "updated_parsed",
+        "date_parsed",
+        "created_parsed",
+        "issued_parsed",
+    ):
         if entry.get(key):
             parsed = iso_time(entry[key], default_timezone)
             if parsed:
@@ -286,6 +292,9 @@ def fetch_article(link: str) -> tuple[str, list[str], str]:
         return "", [], link
 
     resolved_link = response.url if response.url.startswith(("http://", "https://")) else link
+    if is_google_news_url(resolved_link):
+        LOGGER.warning("Google News URL did not resolve to a publisher: %s", link)
+        return "", [], link
     soup = BeautifulSoup(response.text, "lxml")
     page_images = html_images(response.text, resolved_link)
     for tag in soup(["script", "style", "noscript", "svg", "form", "nav", "footer", "header"]):
@@ -314,6 +323,26 @@ def publisher_link(content_html: str, fallback: str) -> str:
 def is_google_news_url(value: str) -> bool:
     """Return whether a URL belongs to Google News rather than a publisher."""
     return (urlparse(value).hostname or "").lower() in GOOGLE_NEWS_HOSTS
+
+
+def has_read_more_marker(value: str) -> bool:
+    """Return whether RSS content explicitly indicates that it is truncated."""
+    if not value:
+        return False
+    soup = BeautifulSoup(html.unescape(value), "lxml")
+    marker_text = " ".join(
+        clean_text(node.get_text(" ", strip=True))
+        for node in soup.find_all(["a", "button"])
+    )
+    marker_text = f"{marker_text} {clean_text(soup.get_text(' ', strip=True))}"
+    return bool(
+        re.search(
+            r"\b(?:read\s+more|continue\s+reading|read\s+the\s+full)\b"
+            r"|阅读全文|继续阅读|查看全文",
+            marker_text,
+            re.IGNORECASE,
+        )
+    )
 
 
 def detect_language(entry: Mapping[str, Any], value: str) -> str:
@@ -444,9 +473,10 @@ def fetch_feed(feed_config: FeedConfig) -> list[dict[str, Any]]:
         link = publisher_link(content_html, link)
         content = html_to_markdown(content_html, link)
         image_sources = rss_images(entry, link) + html_images(content_html, link)
-        if google_news_entry or len(content) < 400 or not image_sources:
+        truncated = has_read_more_marker(content_html)
+        if google_news_entry or truncated or len(content) < 400 or not image_sources:
             fetched_content, fetched_images, resolved_link = fetch_article(link)
-            if len(fetched_content) > len(content):
+            if fetched_content and (google_news_entry or truncated or len(fetched_content) > len(content)):
                 content = fetched_content
             if resolved_link != link and not is_google_news_url(resolved_link):
                 link = resolved_link
