@@ -119,7 +119,7 @@ FEEDS = (
     FeedConfig(
         "china",
         "财富中文网",
-        "https://feeder.co/discover/85dc2f2c3f/fortunechina-com",
+        "https://plink.anyfeeder.com/fortunechina",
         10,
     ),
     FeedConfig(
