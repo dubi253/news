@@ -142,6 +142,18 @@ class FeedPipelineTests(unittest.TestCase):
 
         self.assertEqual(len(items), 2)
 
+    def test_feed_is_requested_with_reader_identity(self):
+        # 用浏览器 UA 抓 RSS 会被 Guardian 这类 WAF 判为伪装浏览器并 403。
+        response = Mock(content=b"<rss />")
+        feed = FeedConfig("test", "Test", "https://example.com/feed", 1)
+        with (
+            patch.object(feeds.http, "get_bytes", return_value=response) as get_bytes,
+            patch.object(feeds.feedparser, "parse", return_value=Mock(entries=[])),
+        ):
+            feeds.fetch_feed(feed)
+
+        self.assertEqual(get_bytes.call_args.kwargs["headers"], feeds.FEED_HEADERS)
+
 
 if __name__ == "__main__":
     unittest.main()

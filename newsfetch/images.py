@@ -16,7 +16,7 @@ from collections.abc import Iterable, Mapping
 from io import BytesIO
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+from urllib.parse import unquote, urlparse, urlunparse
 
 from bs4 import BeautifulSoup
 from PIL import Image, UnidentifiedImageError
@@ -79,6 +79,22 @@ RENDITION_QUERY_KEYS = {
     "scale",
     "compress",
 }
+# 七牛这类把处理参数写成 `imageMogr2/quality/90` 的语法，整段都是渲染参数。
+RENDITION_QUERY_PREFIXES = ("imagemogr2",)
+# 带签名的地址不能改查询串：Guardian 的 `s=`、S3 的 `X-Amz-*` 都是对参数签名，
+# 少一个参数就是 401，宁可原样下载。
+SIGNATURE_QUERY_KEYS = {
+    "s",
+    "sig",
+    "sign",
+    "signature",
+    "token",
+    "auth",
+    "expires",
+    "hmac",
+    "hash",
+    "key",
+}
 SRCSET_SPLIT = re.compile(r",\s*")
 WIDTH_DESCRIPTOR = re.compile(r"(\d{2,5})w$")
 SCALE_DESCRIPTOR = re.compile(r"(\d(?:\.\d)?)x$")
@@ -96,32 +112,56 @@ def is_non_article(url: str) -> bool:
     return any(re.search(rf"(^|[/_.-]){marker}([/_.-]|$)", path) for marker in NON_ARTICLE_MARKERS)
 
 
+def _strip_rendition_query(query: str) -> str:
+    """删掉只影响渲染的查询参数，其余部分按原样保留。
+
+    不能用 ``parse_qsl`` + ``urlencode`` 重编码：七牛的处理参数是
+    ``imageMogr2/quality/90`` 这种没有键值的写法，重编码会把 ``/`` 转义成
+    ``%2F`` 并补上 ``=``，服务端直接 400。
+    """
+    kept: list[str] = []
+    for pair in query.split("&"):
+        if not pair:
+            continue
+        key = unquote(pair.split("=", 1)[0]).strip().lower()
+        if key in RENDITION_QUERY_KEYS or key.startswith(RENDITION_QUERY_PREFIXES):
+            continue
+        kept.append(pair)
+    return "&".join(kept)
+
+
+def _is_signed_query(query: str) -> bool:
+    """查询串里是否带有签名类参数（改一个字符就 401）。"""
+    for pair in query.split("&"):
+        key = unquote(pair.split("=", 1)[0]).strip().lower()
+        if key in SIGNATURE_QUERY_KEYS or key.startswith("x-amz-") or key.startswith("x-goog-"):
+            return True
+    return False
+
+
 def upgrade_url(url: str) -> str:
-    """尽量把图片地址升级为原始尺寸，并去掉只影响渲染的查询参数。"""
+    """尽量把图片地址升级为原始尺寸，并去掉只影响渲染的查询参数。
+
+    带签名的地址只做路径级升级（如微信图床），查询串原样保留。
+    """
     parsed = urlparse(url)
     path = parsed.path
     # 微信图床：路径末位是宽度，0 表示原图。
     if "mmbiz.qpic.cn" in (parsed.hostname or ""):
         path = re.sub(r"/\d{2,4}$", "/0", path)
     path = RESIZED_FILENAME.sub("", path)
-    query = [
-        (key, value)
-        for key, value in parse_qsl(parsed.query, keep_blank_values=True)
-        if key.lower() not in RENDITION_QUERY_KEYS
-    ]
-    return urlunparse(parsed._replace(path=path, query=urlencode(query)))
+    query = parsed.query
+    if not _is_signed_query(query):
+        query = _strip_rendition_query(query)
+    return urlunparse(parsed._replace(path=path, query=query))
 
 
 def normalize_key(url: str) -> str:
     """生成忽略尺寸差异的图片标识，用于同一张图的去重。"""
     parsed = urlparse(upgrade_url(url))
     path = SIZE_TOKEN.sub("", RESIZED_FILENAME.sub("", parsed.path))
-    query = [
-        (key, value)
-        for key, value in parse_qsl(parsed.query, keep_blank_values=True)
-        if key.lower() not in RENDITION_QUERY_KEYS
-    ]
-    return urlunparse((parsed.scheme, parsed.netloc, path, "", urlencode(query), ""))
+    query = _strip_rendition_query(parsed.query)
+    return urlunparse((parsed.scheme, parsed.netloc, path, "", query, ""))
 
 
 def _descriptor_width(descriptor: str) -> int:

@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 
 import feedparser
 
+from config import FEED_HEADERS
 from newsfetch import browser, http
 from newsfetch.urls import host_of
 
@@ -84,7 +85,7 @@ def fetch_entries(feed_url: str, limit: int) -> list[dict[str, Any]]:
     Returns:
         形如 ``{"title", "link", "published"}`` 的条目列表；链接还原失败的条目被丢弃。
     """
-    response = http.get_bytes(feed_url)
+    response = http.get_bytes(feed_url, headers=FEED_HEADERS)
     if response is None:
         return []
     parsed = feedparser.parse(response.content)

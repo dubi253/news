@@ -10,6 +10,7 @@ import feedparser
 
 from config import (
     BASE_DIR,
+    FEED_HEADERS,
     IMAGE_DIR,
     MAX_IMAGES_PER_ITEM,
     MAX_PER_FEED,
@@ -45,7 +46,7 @@ def _load_entries(feed_config: FeedConfig) -> list[Mapping[str, Any]]:
     if googlenews.is_google_news_feed(feed_config.url):
         return list(googlenews.fetch_entries(feed_config.url, _limit(feed_config)))
 
-    response = http.get_bytes(feed_config.url)
+    response = http.get_bytes(feed_config.url, headers=FEED_HEADERS)
     if response is None:
         return []
     parsed = feedparser.parse(response.content)

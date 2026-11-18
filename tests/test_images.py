@@ -64,6 +64,23 @@ class CandidateSelectionTests(unittest.TestCase):
         right = images.normalize_key("https://cdn.example.com/a.jpg?w=1600")
         self.assertEqual(left, right)
 
+    def test_qiniu_processing_syntax_is_removed_without_reencoding(self):
+        # 七牛把处理参数写成 imageMogr2/quality/90，重编码会变成 %2F 导致 400。
+        url = "https://static.leiphone.com/a.jpg?imageMogr2/quality/90"
+        self.assertEqual(images.upgrade_url(url), "https://static.leiphone.com/a.jpg")
+
+    def test_signed_url_keeps_query_untouched(self):
+        # Guardian 的 s= 是对 width/quality 一起签名，改动任一参数都会 401。
+        url = (
+            "https://i.guim.co.uk/img/media/abc/770_0_4580_3666/master/4580.jpg"
+            "?width=700&quality=85&auto=format&fit=max&s=12e753f9ffe8618f09c67a8d5bf36aa5"
+        )
+        self.assertEqual(images.upgrade_url(url), url)
+
+    def test_unknown_query_parameters_survive(self):
+        url = "https://cdn.example.com/a.jpg?id=42&w=640"
+        self.assertEqual(images.upgrade_url(url), "https://cdn.example.com/a.jpg?id=42")
+
 
 class DownloadFilterTests(unittest.TestCase):
     def test_low_resolution_and_tiny_images_are_dropped(self):

@@ -71,6 +71,13 @@ HEADERS = {
     "Sec-Fetch-Site": "same-origin",
     "Upgrade-Insecure-Requests": "1",
 }
+# 订阅源用自己的身份抓：冒充浏览器但 TLS 指纹不像浏览器，会被
+# Guardian 这类 WAF 直接 403（实测同一 IP 下 Chrome UA 403、订阅器 UA 200）。
+FEED_HEADERS = {
+    "User-Agent": "news-fetch/0.1 (+https://github.com/dubi253/news)",
+    "Accept": "application/rss+xml, application/atom+xml, application/xml;q=0.9, */*;q=0.8",
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+}
 
 
 FEEDS = (
