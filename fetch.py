@@ -1,884 +1,118 @@
-# -*- coding: utf-8 -*-
-"""Fetch categorized news with local article images."""
+#!/usr/bin/env python3
+"""抓取分类新闻，下载正文配图，输出 data/news.json。
+
+用法::
+
+    uv run fetch.py            # 全量抓取
+    uv run fetch.py --feed 雷峰 # 只抓来源名包含“雷峰”的订阅源，便于调试
+"""
 
 from __future__ import annotations
 
-import hashlib
-import html
+import argparse
 import json
 import logging
-import mimetypes
 import os
-import re
 import shutil
 import tempfile
-from collections.abc import Mapping
-from datetime import datetime, timezone
-from email.utils import parsedate_to_datetime
+from collections.abc import Sequence
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
-from urllib.parse import parse_qs, urljoin, urlparse
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-import feedparser
-from gnews import GNews
-from gnews.exceptions import GNewsException
-import httpx
-import requests
-from bs4 import BeautifulSoup
-from bs4.element import NavigableString, Tag
-from wechat_article_parser import (
-    WeChatVerifyError,
-    parse as parse_wechat_article,
-)
+from config import DATA_DIR, FEEDS, IMAGE_DIR, MAX_ITEMS, OUTPUT_PATH, FeedConfig
+from newsfetch import browser, dates
+from newsfetch.feeds import fetch_feed
 
-from config import (
-    BASE_DIR,
-    DATA_DIR,
-    FEEDS,
-    HEADERS,
-    IMAGE_DIR,
-    MAX_CONTENT_LENGTH,
-    MAX_IMAGE_BYTES,
-    MAX_IMAGES_PER_ITEM,
-    MAX_ITEMS,
-    MAX_PER_FEED,
-    OUTPUT_PATH,
-    TIMEOUT_SECONDS,
-    FeedConfig,
-)
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-LOGGER = logging.getLogger("news")
-SESSION = requests.Session()
-SESSION.headers.update(HEADERS)
-IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif"}
-BLOCK_TAGS = {"blockquote", "li", "p"}
-HEADING_TAGS = {"h1", "h2", "h3", "h4", "h5", "h6"}
-GOOGLE_NEWS_HOSTS = {"news.google.com", "www.news.google.com"}
-AVATAR_MARKERS = {
-    "avatar",
-    "author",
-    "headshot",
-    "icon",
-    "logo",
-    "profile",
-    "user",
-}
+LOGGER = logging.getLogger("newsfetch")
 
 
-def clean_text(value: str | None) -> str:
-    """Decode HTML entities and normalize whitespace."""
-    return re.sub(r"\s+", " ", html.unescape(value or "")).strip()
-
-
-def iso_time(value: Any, default_timezone: str | None = None) -> str:
-    """Normalize an RSS date, preserving or applying its configured timezone."""
-    if not value:
-        return ""
-    try:
-        if hasattr(value, "tm_year"):
-            parsed = datetime(*value[:6])
-        else:
-            text = str(value).strip()
-            try:
-                parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
-            except ValueError:
-                parsed = parsedate_to_datetime(text)
-        if parsed.tzinfo is None:
-            if not default_timezone:
-                return ""
-            parsed = parsed.replace(tzinfo=ZoneInfo(default_timezone))
-        elif default_timezone:
-            parsed = parsed.astimezone(ZoneInfo(default_timezone))
-        return parsed.isoformat()
-    except (TypeError, ValueError, OverflowError, ZoneInfoNotFoundError):
-        return ""
-
-
-def published_time(
-    entry: Mapping[str, Any],
-    default_timezone: str | None = None,
-) -> str:
-    """Return the best available publication timestamp."""
-    for key in ("published", "updated", "date", "created", "issued"):
-        if entry.get(key):
-            parsed = iso_time(entry[key], default_timezone)
-            if parsed:
-                return parsed
-    for key in (
-        "published_parsed",
-        "updated_parsed",
-        "date_parsed",
-        "created_parsed",
-        "issued_parsed",
-    ):
-        if entry.get(key):
-            parsed = iso_time(entry[key], default_timezone)
-            if parsed:
-                return parsed
-    return ""
-
-
-def published_sort_key(item: Mapping[str, Any]) -> float:
-    """Sort publication timestamps by instant, regardless of their timezone."""
-    published = item.get("published")
-    if not published:
-        return 0.0
-    try:
-        return datetime.fromisoformat(str(published)).timestamp()
-    except (TypeError, ValueError, OverflowError):
-        return 0.0
-
-
-def absolute_url(value: str | None, base: str) -> str:
-    """Resolve a URL and reject unsupported schemes."""
-    if not value:
-        return ""
-    resolved = html.unescape(value.strip())
-    if resolved.startswith("//"):
-        resolved = f"https:{resolved}"
-    resolved = urljoin(base, resolved)
-    return resolved if resolved.startswith(("http://", "https://")) else ""
-
-
-def unwrap_wechat_article_url(value: str) -> str:
-    """Unwrap an RSS bridge URL to the WeChat article target URL."""
-    parsed = urlparse(value)
-    if (parsed.hostname or "").lower() != "mp.weixin.qq.com":
-        return value
-    if parsed.path != "/mp/wappoc_appmsgcaptcha":
-        return value
-
-    target_url = parse_qs(parsed.query).get("target_url", [""])[0]
-    target = absolute_url(target_url, value)
-    target_parsed = urlparse(target)
-    if (
-        (target_parsed.hostname or "").lower() == "mp.weixin.qq.com"
-        and target_parsed.path.startswith("/s/")
-    ):
-        return target
-    return value
-
-
-def is_wechat_verification_page(url: str, content: str) -> bool:
-    """Detect WeChat anti-bot pages that do not contain article content."""
-    parsed = urlparse(url)
-    if (
-        (parsed.hostname or "").lower() == "mp.weixin.qq.com"
-        and parsed.path == "/mp/wappoc_appmsgcaptcha"
-    ):
-        return True
-
-    marker_text = clean_text(BeautifulSoup(content or "", "lxml").get_text(" ", strip=True))
-    markers = (
-        "当前环境异常",
-        "完成验证后即可继续访问",
-        "去验证",
-        "wappoc_appmsgcaptcha",
-    )
-    return any(marker in marker_text or marker in content for marker in markers)
-
-
-def extract_wechat_article_html(content: str) -> str:
-    """Extract the WeChat article body when it is available in rendered HTML."""
-    soup = BeautifulSoup(content or "", "lxml")
-    article = soup.find(id="js_content") or soup.find("article") or soup.find("main")
-    if not article:
-        return ""
-    for tag in article(["script", "style", "noscript", "svg", "form", "nav", "footer", "header"]):
-        tag.decompose()
-    return str(article)
-
-
-def parse_wechat_cookie_header(value: str) -> list[dict[str, str]]:
-    """Convert an exported Cookie header into Playwright cookie entries."""
-    cookies: list[dict[str, str]] = []
-    for item in value.split(";"):
-        name, separator, cookie_value = item.strip().partition("=")
-        if separator and name:
-            cookies.append(
-                {
-                    "name": name,
-                    "value": cookie_value,
-                    "domain": ".weixin.qq.com",
-                    "path": "/",
-                }
-            )
-    return cookies
-
-
-def prepare_wechat_storage_state() -> tuple[str | None, str | None]:
-    """Resolve a Playwright storage-state file or return it as a temporary file."""
-    value = os.getenv("WECHAT_STORAGE_STATE", "").strip()
-    if not value:
-        return None, None
-    if value.startswith("{"):
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            suffix=".json",
-            prefix="wechat-storage-",
-            delete=False,
-            encoding="utf-8",
-        ) as state_file:
-            state_file.write(value)
-            return state_file.name, state_file.name
-    if os.path.isfile(value):
-        return value, None
-    return None, None
-
-
-def fetch_wechat_article_with_browser(link: str) -> tuple[str, list[str], str]:
-    """Fetch a WeChat article with Playwright and a persistent browser session."""
-    try:
-        from playwright.sync_api import Error as PlaywrightError
-        from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
-        from playwright.sync_api import sync_playwright
-    except ImportError:
-        LOGGER.warning("Playwright is unavailable; keeping WeChat article link: %s", link)
-        return "", [], link
-
-    headful = os.getenv("WECHAT_HEADFUL", "").strip().lower() in {"1", "true", "yes"}
-    profile = os.getenv("WECHAT_BROWSER_PROFILE", "").strip()
-    profile_path = profile or str(DATA_DIR / "wechat-browser")
-    storage_state, temporary_storage_state = prepare_wechat_storage_state()
-    proxy_server = os.getenv("WECHAT_PROXY", "").strip()
-    cookie_header = os.getenv("WECHAT_COOKIE", "").strip()
-    launch_options: dict[str, Any] = {
-        "headless": not headful,
-        "args": ["--disable-http2"],
-    }
-    if proxy_server:
-        launch_options["proxy"] = {"server": proxy_server}
-    executable_path = os.getenv("WECHAT_BROWSER_EXECUTABLE", "").strip()
-    if executable_path:
-        launch_options["executable_path"] = executable_path
-    try:
-        manual_timeout = int(os.getenv("WECHAT_MANUAL_VERIFY_TIMEOUT", "120"))
-    except ValueError:
-        manual_timeout = 120
-    manual_timeout = max(10, manual_timeout)
-
-    try:
-        try:
-            with sync_playwright() as playwright:
-                context_options: dict[str, Any] = dict(launch_options)
-                if storage_state:
-                    context_options["storage_state"] = storage_state
-                context = playwright.chromium.launch_persistent_context(
-                    profile_path,
-                    **context_options,
-                )
-                try:
-                    if cookie_header:
-                        context.add_cookies(parse_wechat_cookie_header(cookie_header))
-                    page = context.pages[0] if context.pages else context.new_page()
-                    page.goto(link, wait_until="domcontentloaded", timeout=30_000)
-                    try:
-                        page.wait_for_selector(
-                            "#js_content",
-                            state="attached",
-                            timeout=(manual_timeout if headful else 20) * 1000,
-                        )
-                    except PlaywrightTimeoutError:
-                        LOGGER.warning(
-                            "WeChat article body was not rendered: %s",
-                            link,
-                        )
-
-                    resolved_link = unwrap_wechat_article_url(page.url)
-                    rendered_html = page.content()
-                    if is_wechat_verification_page(resolved_link, rendered_html):
-                        LOGGER.warning("WeChat verification is still required: %s", link)
-                        return "", [], resolved_link
-
-                    article_html = extract_wechat_article_html(rendered_html)
-                    if not article_html:
-                        return "", [], resolved_link
-                    images = html_images(article_html, resolved_link)
-                    content = html_to_markdown(article_html, resolved_link)
-                    return content, images, resolved_link
-                finally:
-                    context.close()
-        except (PlaywrightError, OSError) as exc:
-            LOGGER.warning("WeChat browser fallback failed %s: %s", link, exc)
-            return "", [], link
-    finally:
-        if temporary_storage_state:
-            try:
-                os.unlink(temporary_storage_state)
-            except OSError:
-                LOGGER.warning("could not remove temporary WeChat storage state")
-
-
-def entry_html(entry: Mapping[str, Any]) -> str:
-    """Extract HTML content from an RSS entry."""
-    content = entry.get("content") or []
-    if content and isinstance(content[0], Mapping):
-        return str(content[0].get("value", ""))
-    return str(entry.get("summary") or entry.get("description") or "")
-
-
-def _inline_markdown(node: Tag | NavigableString, base_url: str) -> str:
-    if isinstance(node, NavigableString):
-        return re.sub(r"\s+", " ", str(node))
-
-    content = "".join(_inline_markdown(child, base_url) for child in node.children)
-    tag_name = node.name.lower()
-    if tag_name in {"strong", "b"}:
-        return f"**{content.strip()}**"
-    if tag_name in {"em", "i"}:
-        return f"*{content.strip()}*"
-    if tag_name == "code":
-        return f"`{content.strip()}`"
-    if tag_name == "a":
-        link = absolute_url(node.get("href"), base_url)
-        return f"[{content.strip()}]({link})" if link else content
-    if tag_name == "br":
-        return "\n"
-    return content
-
-
-def html_to_markdown(value: str, base_url: str = "") -> str:
-    """Convert article HTML into readable Markdown paragraphs."""
-    if not value:
-        return ""
-    soup = BeautifulSoup(html.unescape(value), "lxml")
-    for tag in soup(["script", "style", "noscript", "svg", "form", "img"]):
-        tag.decompose()
-
-    blocks: list[str] = []
-    for node in soup.find_all(list(BLOCK_TAGS | HEADING_TAGS)):
-        if node.name == "li" and node.find_parent("li"):
-            continue
-        text = _inline_markdown(node, base_url).strip()
-        if not text:
-            continue
-        if node.name in HEADING_TAGS:
-            level = int(node.name[1])
-            blocks.append(f'{"#" * level} {text}')
-        elif node.name == "li":
-            blocks.append(f"- {text}")
-        else:
-            blocks.append(text)
-
-    if not blocks:
-        blocks.append(_inline_markdown(soup, base_url).strip())
-    markdown = "\n\n".join(blocks)
-    markdown = re.sub(r"[ \t]+\n", "\n", markdown)
-    markdown = re.sub(r"\n{3,}", "\n\n", markdown)
-    return markdown[:MAX_CONTENT_LENGTH].strip()
-
-
-def _image_candidate_score(source: str, descriptor: str = "") -> int:
-    """Estimate an image candidate's resolution from srcset or URL metadata."""
-    match = re.search(r"(\d{2,5})w\b", descriptor)
-    if match:
-        return int(match.group(1))
-    for pattern in (r"(?:width|w|size)[=_-](\d{2,5})", r"[_-](\d{3,5})x\d{2,5}"):
-        match = re.search(pattern, source, re.IGNORECASE)
-        if match:
-            return int(match.group(1))
-    return 0
-
-
-def _media_dimension(value: Any) -> int:
-    try:
-        return int(value or 0)
-    except (TypeError, ValueError):
-        return 0
-
-
-def _is_avatar(image: Tag) -> bool:
-    """Reject common author/avatar/icon images."""
-    text = " ".join(
-        str(image.get(attribute, ""))
-        for attribute in ("alt", "class", "id", "data-testid", "aria-label")
-    ).lower()
-    return any(re.search(rf"\b{re.escape(marker)}\b", text) for marker in AVATAR_MARKERS)
-
-
-def html_images(value: str, base: str) -> list[str]:
-    """Extract unique image URLs from HTML."""
-    soup = BeautifulSoup(value or "", "lxml")
-    result: list[str] = []
-    for image in soup.find_all("img"):
-        if _is_avatar(image):
-            continue
-        candidates: list[tuple[int, str]] = []
-        for source in (
-            image.get("src"),
-            image.get("data-src"),
-            image.get("data-original"),
-            image.get("data-lazy-src"),
-        ):
-            resolved = absolute_url(source, base)
-            if resolved and resolved not in result:
-                candidates.append((_image_candidate_score(resolved), resolved))
-        picture = image.find_parent("picture")
-        if picture:
-            source_tags = picture.find_all("source")
-            for source_tag in source_tags:
-                for candidate in str(source_tag.get("srcset", "")).split(","):
-                    parts = candidate.strip().split()
-                    if not parts:
-                        continue
-                    resolved = absolute_url(parts[0], base)
-                    if resolved:
-                        candidates.append(
-                            (
-                                _image_candidate_score(
-                                    resolved, parts[1] if len(parts) > 1 else ""
-                                ),
-                                resolved,
-                            )
-                        )
-        for candidate in str(image.get("srcset", "")).split(","):
-            parts = candidate.strip().split()
-            if not parts:
-                continue
-            resolved = absolute_url(parts[0], base)
-            if resolved:
-                candidates.append(
-                    (_image_candidate_score(resolved, parts[1] if len(parts) > 1 else ""), resolved)
-                )
-        if candidates:
-            result.append(max(candidates, key=lambda item: item[0])[1])
-    for metadata in soup.find_all("meta", attrs={"property": "og:image"}):
-        resolved = absolute_url(metadata.get("content"), base)
-        if resolved and not is_non_article_image(resolved) and resolved not in result:
-            result.append(resolved)
-    return result
-
-
-def rss_images(entry: Mapping[str, Any], base: str) -> list[str]:
-    """Extract unique image URLs from common RSS media fields."""
-    result: list[str] = []
-    for key in ("media_content", "media_thumbnail"):
-        candidates = []
-        for item in entry.get(key, []) or []:
-            source = absolute_url(item.get("url"), base)
-            if source:
-                width = _media_dimension(item.get("width"))
-                height = _media_dimension(item.get("height"))
-                candidates.append((width * height or width or height, source))
-        if candidates:
-            result.append(max(candidates, key=lambda item: item[0])[1])
-    for enclosure in entry.get("enclosures", []) or []:
-        if str(enclosure.get("type", "")).startswith("image"):
-            source = absolute_url(enclosure.get("href") or enclosure.get("url"), base)
-            if source and source not in result:
-                result.append(source)
-    return result
-
-
-def fetch_article(link: str) -> tuple[str, list[str], str]:
-    """Fetch a full article when the RSS entry is incomplete."""
-    link = unwrap_wechat_article_url(link)
-    is_wechat = (urlparse(link).hostname or "").lower() == "mp.weixin.qq.com"
-    if is_wechat:
-        try:
-            proxy = os.getenv("WECHAT_PROXY", "").strip() or None
-            result = parse_wechat_article(
-                link,
-                timeout=TIMEOUT_SECONDS,
-                user_agent=SESSION.headers.get("User-Agent"),
-                proxy=proxy,
-            )
-            if result.is_valid and result.article_markdown:
-                return (
-                    result.article_markdown,
-                    list(dict.fromkeys(result.images)),
-                    link,
-                )
-        except WeChatVerifyError:
-            LOGGER.warning("WeChat verification page encountered: %s", link)
-        except (httpx.HTTPError, TimeoutError, OSError, TypeError, ValueError) as exc:
-            LOGGER.warning("WeChat article parser failed %s: %s", link, exc)
-
-        return fetch_wechat_article_with_browser(link)
-
-    try:
-        response = SESSION.get(link, timeout=TIMEOUT_SECONDS)
-        response.raise_for_status()
-    except requests.RequestException as exc:
-        LOGGER.warning("article fetch failed %s: %s", link, exc)
-        if is_wechat:
-            return fetch_wechat_article_with_browser(link)
-        return "", [], link
-
-    resolved_link = unwrap_wechat_article_url(
-        response.url if response.url.startswith(("http://", "https://")) else link
-    )
-    if is_wechat_verification_page(resolved_link, response.text):
-        LOGGER.warning("WeChat verification page encountered: %s", resolved_link)
-        if is_wechat:
-            return fetch_wechat_article_with_browser(link)
-        return "", [], resolved_link
-
-    soup = BeautifulSoup(response.text, "lxml")
-    page_images = html_images(response.text, resolved_link)
-    for tag in soup(["script", "style", "noscript", "svg", "form", "nav", "footer", "header"]):
-        tag.decompose()
-    article = soup.find("article") or soup.find("main") or soup
-    article_html = str(article)
-    return (
-        html_to_markdown(article_html, resolved_link),
-        page_images + html_images(article_html, resolved_link),
-        resolved_link,
+def select_feeds(filters: Sequence[str]) -> tuple[FeedConfig, ...]:
+    """按来源名或地址过滤订阅源；为空时返回全部。"""
+    if not filters:
+        return FEEDS
+    return tuple(
+        feed
+        for feed in FEEDS
+        if any(keyword in feed.source or keyword in feed.url for keyword in filters)
     )
 
 
-def is_google_news_url(value: str) -> bool:
-    """Return whether a URL belongs to Google News rather than a publisher."""
-    return (urlparse(value).hostname or "").lower() in GOOGLE_NEWS_HOSTS
-
-
-def resolve_google_news_url(value: str) -> str:
-    """Resolve a Google News article URL to its publisher URL with Chromium."""
-    if not is_google_news_url(value):
-        return value
-
-    try:
-        from playwright.sync_api import Error as PlaywrightError
-        from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
-        from playwright.sync_api import sync_playwright
-    except ImportError:
-        LOGGER.warning("Playwright is unavailable; keeping Google News URL: %s", value)
-        return value
-
-    navigate_url = value.replace("/rss/articles/", "/articles/").split("?", 1)[0]
-    with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(headless=True, args=["--disable-http2"])
-        try:
-            page = browser.new_page()
-            page.goto(navigate_url, wait_until="domcontentloaded", timeout=30_000)
-            try:
-                page.wait_for_url(
-                    lambda url: "news.google.com" not in url,
-                    timeout=15_000,
-                )
-            except PlaywrightTimeoutError:
-                pass
-            resolved = page.url
-        except PlaywrightError as exc:
-            LOGGER.warning("Google News URL resolution failed %s: %s", value, exc)
-            return value
-        finally:
-            browser.close()
-
-    if is_google_news_url(resolved):
-        LOGGER.warning("Google News URL did not resolve to a publisher: %s", value)
-        return value
-    return resolved
-
-
-def has_read_more_marker(value: str) -> bool:
-    """Return whether RSS content explicitly indicates that it is truncated."""
-    if not value:
-        return False
-    soup = BeautifulSoup(html.unescape(value), "lxml")
-    marker_text = " ".join(
-        clean_text(node.get_text(" ", strip=True))
-        for node in soup.find_all(["a", "button"])
-    )
-    marker_text = f"{marker_text} {clean_text(soup.get_text(' ', strip=True))}"
-    return bool(
-        re.search(
-            r"\b(?:read\s+more|continue\s+reading|read\s+the\s+full)\b"
-            r"|阅读全文|继续阅读|查看全文",
-            marker_text,
-            re.IGNORECASE,
-        )
-    )
-
-
-def detect_language(entry: Mapping[str, Any], value: str) -> str:
-    """Return a simple ISO 639-1 language code for a news item."""
-    explicit = str(entry.get("language") or "").lower().split("-", 1)[0]
-    if explicit in {"en", "zh"}:
-        return explicit
-    cjk = len(re.findall(r"[\u3400-\u9fff]", value))
-    latin = len(re.findall(r"[A-Za-z]", value))
-    if cjk:
-        return "zh"
-    if latin:
-        return "en"
-    return "unknown"
-
-
-def translate_to_chinese(values: list[str]) -> list[str]:
-    """Translate text values with Google Cloud Translation when configured."""
-    api_key = os.getenv("GOOGLE_TRANSLATE_API_KEY", "").strip()
-    if not api_key or not values:
-        return values
-    translated_values: list[str] = []
-    for value in values:
-        translated_parts: list[str] = []
-        parts = [value[index : index + 20_000] for index in range(0, len(value), 20_000)] or [""]
-        for part in parts:
-            try:
-                response = SESSION.post(
-                    "https://translation.googleapis.com/language/translate/v2",
-                    params={"key": api_key},
-                    json={"q": [part], "target": "zh-CN", "format": "text"},
-                    timeout=TIMEOUT_SECONDS,
-                )
-                response.raise_for_status()
-                translated_parts.append(str(response.json()["data"]["translations"][0]["translatedText"]))
-            except (requests.RequestException, KeyError, IndexError, TypeError, ValueError) as exc:
-                LOGGER.warning("translation failed: %s", exc)
-                translated_parts = []
-                break
-        translated_values.append("".join(translated_parts) if translated_parts else value)
-    return translated_values
-
-
-def image_extension(response: requests.Response, source: str) -> str:
-    """Determine a safe local image extension."""
-    content_type = response.headers.get("Content-Type", "").split(";", 1)[0].lower()
-    extension = mimetypes.guess_extension(content_type) if content_type.startswith("image/") else None
-    if extension in IMAGE_EXTENSIONS:
-        return ".jpg" if extension == ".jpe" else extension
-    suffix = Path(urlparse(source).path).suffix.lower()
-    return suffix if suffix in IMAGE_EXTENSIONS else ".jpg"
-
-
-def image_headers(source: str) -> dict[str, str]:
-    """Build headers used by image hosts that validate the referrer."""
-    parsed = urlparse(source)
-    host = parsed.hostname or ""
-    referer_host = host[2:] if host.startswith("i.") else host
-    if referer_host == "qbitai.com":
-        referer_host = "www.qbitai.com"
-    return {
-        "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
-        "Referer": f"{parsed.scheme or 'https'}://{referer_host}/",
-    }
-
-
-def is_non_article_image(source: str) -> bool:
-    """Reject common avatar, icon, logo, and tracking image URLs."""
-    path = urlparse(source).path.lower()
-    return any(
-        re.search(rf"(^|[/_.-]){re.escape(marker)}([/_.-]|$)", path)
-        for marker in AVATAR_MARKERS | {"favicon", "pixel", "tracking"}
-    )
-
-
-def download_image(source: str, index: int) -> str:
-    """Download one image and return its repository-relative path."""
-    if is_non_article_image(source):
-        return ""
-    try:
-        response = SESSION.get(
-            source,
-            headers=image_headers(source),
-            timeout=TIMEOUT_SECONDS,
-            stream=True,
-        )
-        response.raise_for_status()
-        content_type = response.headers.get("Content-Type", "").lower()
-        if content_type and not content_type.startswith("image/"):
-            return ""
-        data = response.content
-        if not data or len(data) > MAX_IMAGE_BYTES:
-            return ""
-        digest = hashlib.sha256(data).hexdigest()[:16]
-        destination = IMAGE_DIR / f"{digest}{image_extension(response, source)}"
-        if not destination.exists():
-            destination.write_bytes(data)
-        return str(destination.relative_to(BASE_DIR)).replace("\\", "/")
-    except (requests.RequestException, OSError) as exc:
-        LOGGER.warning("image download failed %s: %s", source, exc)
-        return ""
-
-
-def fetch_feed(feed_config: FeedConfig) -> list[dict[str, Any]]:
-    """Fetch and normalize entries from one configured RSS feed."""
-    LOGGER.info("fetching %s", feed_config.url)
-    parsed_url = urlparse(feed_config.url)
-    if parsed_url.hostname in GOOGLE_NEWS_HOSTS:
-        return fetch_google_news_feed(feed_config)
-
-    try:
-        response = SESSION.get(feed_config.url, timeout=TIMEOUT_SECONDS)
-        response.raise_for_status()
-        parsed = feedparser.parse(response.content)
-    except requests.RequestException as exc:
-        LOGGER.warning("feed failed %s: %s", feed_config.url, exc)
-        return []
-
-    if not parsed.entries:
-        LOGGER.warning("feed has no entries: %s", feed_config.url)
-        return []
-
-    items: list[dict[str, Any]] = []
-    for entry in parsed.entries[: feed_config.limit or MAX_PER_FEED]:
-        title = clean_text(entry.get("title"))
-        link = unwrap_wechat_article_url(
-            absolute_url(entry.get("link"), feed_config.url)
-        )
-        if not title or not link:
-            continue
-
-        content_html = entry_html(entry)
-        content = html_to_markdown(content_html, link)
-        image_sources = rss_images(entry, link) + html_images(content_html, link)
-        truncated = has_read_more_marker(content_html)
-        if truncated or len(content) < 400 or not image_sources:
-            fetched_content, fetched_images, resolved_link = fetch_article(link)
-            if fetched_content and (truncated or len(fetched_content) > len(content)):
-                content = fetched_content
-            if resolved_link != link:
-                link = resolved_link
-            image_sources.extend(fetched_images)
-
-        language = detect_language(entry, f"{title}\n{content}")
-        if language == "en":
-            translated = translate_to_chinese([title, content])
-            title, content = translated
-
-        local_images: list[str] = []
-        for image_index, source in enumerate(dict.fromkeys(image_sources)):
-            local_path = download_image(source, image_index)
-            if local_path and local_path not in local_images:
-                local_images.append(local_path)
-            if len(local_images) >= MAX_IMAGES_PER_ITEM:
-                break
-
-        items.append(
-            {
-                "category": feed_config.category,
-                "source": feed_config.source or parsed.feed.get("title", feed_config.url),
-                "title": title,
-                "language": language,
-                "published": published_time(entry, feed_config.default_timezone),
-                "link": link,
-                "content": content,
-                "images": local_images,
-            }
-        )
-    return items
-
-
-def fetch_google_news_feed(feed_config: FeedConfig) -> list[dict[str, Any]]:
-    """Fetch and normalize a Google News RSS search with GNews."""
-    query = parse_qs(urlparse(feed_config.url).query).get("q", [""])[0]
-    if not query:
-        LOGGER.warning("Google News feed has no search query: %s", feed_config.url)
-        return []
-
-    params = parse_qs(urlparse(feed_config.url).query)
-    language = params.get("hl", ["en"])[0]
-    country = params.get("gl", ["US"])[0]
-    try:
-        articles = GNews(
-            language=language,
-            country=country,
-            max_results=feed_config.limit or MAX_PER_FEED,
-        ).get_news(query)
-    except GNewsException as exc:
-        LOGGER.warning("Google News feed failed %s: %s", feed_config.url, exc)
-        return []
-
-    entries: list[dict[str, Any]] = []
-    for article in articles:
-        link = str(article.get("url", ""))
-        entries.append(
-            {
-                "title": article.get("title", ""),
-                "link": resolve_google_news_url(link),
-                "description": article.get("description", ""),
-                "published": article.get("published date", ""),
-            }
-        )
-    return normalize_entries(entries, feed_config)
-
-
-def normalize_entries(
-    entries: list[Mapping[str, Any]],
-    feed_config: FeedConfig,
-) -> list[dict[str, Any]]:
-    """Normalize already parsed RSS-like entries into news items."""
-    items: list[dict[str, Any]] = []
-    for entry in entries:
-        title = clean_text(entry.get("title"))
-        link = unwrap_wechat_article_url(
-            absolute_url(entry.get("link"), feed_config.url)
-        )
-        if not title or not link:
-            continue
-
-        content_html = entry_html(entry)
-        content = html_to_markdown(content_html, link)
-        image_sources = rss_images(entry, link) + html_images(content_html, link)
-        truncated = has_read_more_marker(content_html)
-        if truncated or len(content) < 400 or not image_sources:
-            fetched_content, fetched_images, resolved_link = fetch_article(link)
-            if fetched_content and (truncated or len(fetched_content) > len(content)):
-                content = fetched_content
-            if resolved_link != link:
-                link = resolved_link
-            image_sources.extend(fetched_images)
-
-        language = detect_language(entry, f"{title}\n{content}")
-        if language == "en":
-            translated = translate_to_chinese([title, content])
-            title, content = translated
-
-        local_images: list[str] = []
-        for image_index, source in enumerate(dict.fromkeys(image_sources)):
-            local_path = download_image(source, image_index)
-            if local_path and local_path not in local_images:
-                local_images.append(local_path)
-            if len(local_images) >= MAX_IMAGES_PER_ITEM:
-                break
-
-        items.append(
-            {
-                "category": feed_config.category,
-                "source": feed_config.source,
-                "title": title,
-                "language": language,
-                "published": published_time(entry, feed_config.default_timezone),
-                "link": link,
-                "content": content,
-                "images": local_images,
-            }
-        )
-    return items
-
-
-def main() -> None:
-    """Fetch all configured feeds and write the latest news snapshot."""
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
+def reset_image_dir() -> None:
+    """清空旧的图片目录，保证产物与这一轮抓取一致。"""
     if IMAGE_DIR.exists():
         shutil.rmtree(IMAGE_DIR)
     IMAGE_DIR.mkdir(parents=True, exist_ok=True)
 
-    items: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for feed in FEEDS:
-        for item in fetch_feed(feed):
-            if item["link"] not in seen:
-                seen.add(item["link"])
-                items.append(item)
 
-    items.sort(key=published_sort_key, reverse=True)
-    items = items[:MAX_ITEMS]
+def write_snapshot(items: list[dict[str, object]]) -> None:
+    """原子地写入 news.json。"""
     payload = {
-        "updated": datetime.now(timezone.utc).isoformat(),
+        "updated": datetime.now(UTC).isoformat(),
         "count": len(items),
-        "categories": sorted({item["category"] for item in items}),
+        "categories": sorted({str(item["category"]) for item in items}),
         "items": items,
     }
-    OUTPUT_PATH.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2),
-        encoding="utf-8",
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        "w", suffix=".json", prefix="news-", dir=DATA_DIR, delete=False, encoding="utf-8"
+    ) as handle:
+        json.dump(payload, handle, ensure_ascii=False, indent=2)
+        temporary_path = Path(handle.name)
+    os.replace(temporary_path, OUTPUT_PATH)
+
+
+def collect(feeds: Sequence[FeedConfig]) -> list[dict[str, object]]:
+    """抓取全部订阅源并按链接去重。"""
+    items: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for feed in feeds:
+        try:
+            feed_items = fetch_feed(feed)
+        except Exception:  # noqa: BLE001 - 单个源失败不应中断整轮抓取
+            LOGGER.exception("订阅源抓取异常: %s", feed.source)
+            continue
+        for item in feed_items:
+            link = str(item["link"])
+            if link in seen:
+                continue
+            seen.add(link)
+            items.append(item)
+    return items
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="抓取分类新闻并下载配图")
+    parser.add_argument(
+        "--feed",
+        action="append",
+        default=[],
+        metavar="KEYWORD",
+        help="只抓取来源名或地址包含该关键字的订阅源，可重复",
     )
-    LOGGER.info("wrote %d items to %s", len(items), OUTPUT_PATH)
+    parser.add_argument("--verbose", action="store_true", help="输出调试日志")
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """命令行入口。"""
+    args = build_parser().parse_args(argv)
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+    )
+
+    reset_image_dir()
+    try:
+        items = collect(select_feeds(args.feed))
+    finally:
+        browser.close()
+
+    items.sort(key=dates.sort_key, reverse=True)
+    items = items[:MAX_ITEMS]
+    write_snapshot(items)
+    LOGGER.info("写入 %d 条到 %s", len(items), Path(OUTPUT_PATH))
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

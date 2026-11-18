@@ -1,45 +1,81 @@
-"""Application configuration for the news fetcher."""
+"""应用配置：抓取参数、图片来源与订阅源清单。
+
+本模块只存放常量与数据结构，不包含抓取逻辑，便于被各模块安全导入。
+"""
 
 from dataclasses import dataclass
 from pathlib import Path
 
-from ua_generator import generate
-from ua_generator.options import Options
-
 
 @dataclass(frozen=True, slots=True)
 class FeedConfig:
-    """Configuration for one RSS feed."""
+    """一个 RSS 订阅源的配置。
+
+    Attributes:
+        category: 产物中的分类字段。
+        source: 产物中的来源名，也用于日志。
+        url: 订阅地址；Google News 搜索页同样以 URL 形式给出。
+        limit: 该源最多保留的条目数。
+        timezone: 订阅源时间戳所在的时区。设置后会忽略订阅源自己声明的
+            时区偏移，按该时区的墙上时间解读——用于把本地时间误标成 GMT
+            的发布方（如 InfoQ）。
+    """
 
     category: str
     source: str
     url: str
     limit: int = 8
-    default_timezone: str | None = None
+    timezone: str | None = None
 
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
 IMAGE_DIR = DATA_DIR / "images"
+IMAGE_STAGING_DIR = DATA_DIR / ".images-staging"
 OUTPUT_PATH = DATA_DIR / "news.json"
+WECHAT_PROFILE_DIR = DATA_DIR / "wechat-browser"
 
 TIMEOUT_SECONDS = 20
+BROWSER_TIMEOUT_MS = 30_000
 MAX_PER_FEED = 15
 MAX_ITEMS = 160
 MAX_CONTENT_LENGTH = 50_000
 MAX_IMAGES_PER_ITEM = 5
+MAX_IMAGE_CANDIDATES = 12
 MAX_IMAGE_BYTES = 15 * 1024 * 1024
-USER_AGENT = generate(device='desktop', browser='edge', platform='linux').text
+
+# 正文抓取：短于该长度的正文视为摘要，需要回访原文。
+MIN_ARTICLE_CHARS = 400
+# 图片筛选：低于该分辨率的图片基本是图标、头像或站点素材。
+MIN_IMAGE_WIDTH = 600
+MIN_IMAGE_HEIGHT = 320
+# 过窄或过扁的图片多为横幅、装饰条和二维码。
+MIN_IMAGE_ASPECT = 0.35
+MAX_IMAGE_ASPECT = 4.0
+MIN_IMAGE_BYTES = 12_000
+
+USER_AGENT = (
+    # 固定为常见的 Windows Chrome UA：ua-generator 会给出 Linux/最新版本号，
+    # 微信等站点会直接判为爬虫并返回验证页。
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+)
 HEADERS = {
     "User-Agent": USER_AGENT,
-    "Accept-Language": "en,zh-CN;q=0.8",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,"
+    "image/webp,*/*;q=0.8",
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+    "Cache-Control": "no-cache",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "same-origin",
+    "Upgrade-Insecure-Requests": "1",
 }
-
 
 
 FEEDS = (
     # ============================================================
-    # 1. International News: 12
+    # 1. 国际新闻
     # ============================================================
     FeedConfig(
         "international",
@@ -71,10 +107,9 @@ FEEDS = (
         "https://rss.nytimes.com/services/xml/rss/nyt/World.xml",
         5,
     ),
-        # ============================================================
-    # 2. Chinese Mainstream Media: 10
     # ============================================================
-    # ---- 新华社 / 新华网（国家通讯社，第一优先级）----
+    # 2. 中文主流媒体
+    # ============================================================
     FeedConfig(
         "china",
         "新华社新闻",
@@ -99,57 +134,20 @@ FEEDS = (
         "https://plink.anyfeeder.com/people-daily",
         5,
     ),
-
-    # ---- 中国新闻网（国家二级通讯社，官方原生 RSS 最完整）----
-    # FeedConfig(
-    #     "china",
-    #     "中新网即时",
-    #     "https://www.chinanews.com.cn/rss/scroll-news.xml",
-    #     3,
-    # ),
-    # FeedConfig(
-    #     "china",
-    #     "中新网国际",
-    #     "https://www.chinanews.com.cn/rss/world.xml",
-    #     3,
-    # ),
-    # FeedConfig(
-    #     "china",
-    #     "中新网时政",
-    #     "https://www.chinanews.com.cn/rss/china.xml",
-    #     3,
-    # ),
-    # FeedConfig(
-    #     "china",
-    #     "中新网财经",
-    #     "https://www.chinanews.com.cn/rss/finance.xml",
-    #     3,
-    # ),
-
-    # ---- 央视 / 澎湃（视频与深度时政补充）----
-    # FeedConfig(
-    #     "china",
-    #     "央视新闻",
-    #     "https://plink.anyfeeder.com/cctv/news",
-    #     3,
-    # ),
     FeedConfig(
         "china",
         "澎湃新闻",
         "https://plink.anyfeeder.com/thepaper",
         10,
     ),
-
     FeedConfig(
         "social",
         "微博-热搜榜",
         "https://decemberpei.cyou/rssbox/weibo-realtimehot.xml",
         10,
     ),
-
-
     # ============================================================
-    # 2. General Technology: 14
+    # 3. 通用科技
     # ============================================================
     FeedConfig(
         "technology",
@@ -168,6 +166,7 @@ FEEDS = (
         "InfoQ 中文",
         "https://www.infoq.cn/feed.xml",
         5,
+        # InfoQ 的 pubDate 把北京时间标成了 GMT，只能按东八区解读。
         "Asia/Shanghai",
     ),
     FeedConfig(
@@ -176,9 +175,8 @@ FEEDS = (
         "https://decemberpei.cyou/rssbox/wechat-githubdaily.xml",
         5,
     ),
-
     # ============================================================
-    # 3. Artificial Intelligence: 11
+    # 4. 人工智能
     # ============================================================
     FeedConfig(
         "ai",
@@ -198,9 +196,8 @@ FEEDS = (
         "https://www.leiphone.com/feed/categoryRss/name/private",
         3,
     ),
-
     # ============================================================
-    # 4. Semiconductor - Global: 18
+    # 5. 半导体 - 全球
     # ============================================================
     FeedConfig(
         "semiconductor",
@@ -214,49 +211,50 @@ FEEDS = (
         "https://spectrum.ieee.org/feeds/topic/semiconductors.rss",
         5,
     ),
-    FeedConfig("semiconductor", "Semiconductor Digest",
-           "https://www.semiconductor-digest.com/feed/", 4),
-
+    FeedConfig(
+        "semiconductor",
+        "Semiconductor Digest",
+        "https://www.semiconductor-digest.com/feed/",
+        4,
+    ),
     # ============================================================
-    # 5. Semiconductor - Google News: 2
+    # 6. 半导体 - Google News 聚合
     # ============================================================
     FeedConfig(
         "semiconductor",
         "Google News - 晶圆代工与存储器",
-        "https://news.google.com/rss/search?q=台积电+OR+三星代工+OR+英特尔代工+OR+中芯国际+OR+联电+OR+格芯+OR+华虹+OR+高塔半导体+OR+世界先进+OR+力积电+OR+SK海力士+OR+美光+OR+铠侠+OR+长鑫存储+OR+长江存储+OR+南亚科技+OR+华邦电子+OR+三星存储&hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
+        "https://news.google.com/rss/search?q=台积电+OR+三星代工+OR+英特尔代工+OR+中芯国际"
+        "+OR+联电+OR+格芯+OR+华虹+OR+高塔半导体+OR+世界先进+OR+力积电+OR+SK海力士"
+        "+OR+美光+OR+铠侠+OR+长鑫存储+OR+长江存储+OR+南亚科技+OR+华邦电子+OR+三星存储"
+        "&hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
         4,
     ),
-
     FeedConfig(
         "semiconductor",
         "集微网",
         "https://decemberpei.cyou/rssbox/ijiwei.xml",
         10,
     ),
-
     FeedConfig(
         "semiconductor",
         "半导体行业观察",
         "https://decemberpei.cyou/rssbox/wechat-bandaotihangyeguancha.xml",
         6,
     ),
-
     FeedConfig(
         "semiconductor",
         "半导体芯闻",
         "https://decemberpei.cyou/rssbox/wechat-bandaotixinwen.xml",
         6,
     ),
-
     FeedConfig(
         "semiconductor",
         "芯榜上海",
         "https://decemberpei.cyou/rssbox/wechat-xinbangshanghai.xml",
         6,
     ),
-
     # ============================================================
-    # 6. EDA / IP / Chip Design: 10
+    # 7. EDA / IP / 芯片设计
     # ============================================================
     FeedConfig(
         "semiconductor",
@@ -270,8 +268,8 @@ FEEDS = (
         "https://semiwiki.com/feed/",
         2,
     ),
-
-    # 8. AI Compute / AI Infrastructure: 11
+    # ============================================================
+    # 8. AI 算力 / 基础设施
     # ============================================================
     FeedConfig(
         "ai_infra",
@@ -285,12 +283,14 @@ FEEDS = (
         "https://www.servethehome.com/feed/",
         4,
     ),
-    
     FeedConfig(
         "semiconductor",
         "Google News - Foundry and Memory",
-        "https://news.google.com/rss/search?q=TSMC+OR+%22Samsung+Foundry%22+OR+%22Intel+Foundry%22+OR+SMIC+OR+UMC+OR+GlobalFoundries+OR+%22Hua+Hong%22+OR+%22Tower+Semiconductor%22+OR+VIS+OR+PSMC+OR+X-FAB+OR+%22DB+HiTek%22+OR+%22SK+Hynix%22+OR+Micron+OR+Kioxia+OR+CXMT+OR+YMTC+OR+%22Nanya%22+OR+%22Winbond%22+OR+%22Samsung+Memory%22&hl=en-US&gl=US&ceid=US:en",
+        "https://news.google.com/rss/search?q=TSMC+OR+%22Samsung+Foundry%22"
+        "+OR+%22Intel+Foundry%22+OR+SMIC+OR+UMC+OR+GlobalFoundries+OR+%22Hua+Hong%22"
+        "+OR+%22Tower+Semiconductor%22+OR+VIS+OR+PSMC+OR+X-FAB+OR+%22DB+HiTek%22"
+        "+OR+%22SK+Hynix%22+OR+Micron+OR+Kioxia+OR+CXMT+OR+YMTC+OR+%22Nanya%22"
+        "+OR+%22Winbond%22+OR+%22Samsung+Memory%22&hl=en-US&gl=US&ceid=US:en",
         4,
     ),
 )
-

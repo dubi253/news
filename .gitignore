@@ -32,5 +32,5 @@ dist/
 
 .vscode/
 
-# Keep generated news snapshots and downloaded images tracked for publishing.
-/data/wechat-browser/
+# 抓取产物只在 news 分支发布，主分支不跟踪（CI 用 git add -f 强制加入）。
+/data/
