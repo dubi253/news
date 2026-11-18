@@ -11,6 +11,7 @@ import mimetypes
 import os
 import re
 import shutil
+import tempfile
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
@@ -190,6 +191,43 @@ def extract_wechat_article_html(content: str) -> str:
     return str(article)
 
 
+def parse_wechat_cookie_header(value: str) -> list[dict[str, str]]:
+    """Convert an exported Cookie header into Playwright cookie entries."""
+    cookies: list[dict[str, str]] = []
+    for item in value.split(";"):
+        name, separator, cookie_value = item.strip().partition("=")
+        if separator and name:
+            cookies.append(
+                {
+                    "name": name,
+                    "value": cookie_value,
+                    "domain": ".weixin.qq.com",
+                    "path": "/",
+                }
+            )
+    return cookies
+
+
+def prepare_wechat_storage_state() -> tuple[str | None, str | None]:
+    """Resolve a Playwright storage-state file or return it as a temporary file."""
+    value = os.getenv("WECHAT_STORAGE_STATE", "").strip()
+    if not value:
+        return None, None
+    if value.startswith("{"):
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=".json",
+            prefix="wechat-storage-",
+            delete=False,
+            encoding="utf-8",
+        ) as state_file:
+            state_file.write(value)
+            return state_file.name, state_file.name
+    if os.path.isfile(value):
+        return value, None
+    return None, None
+
+
 def fetch_wechat_article_with_browser(link: str) -> tuple[str, list[str], str]:
     """Fetch a WeChat article with Playwright and a persistent browser session."""
     try:
@@ -203,6 +241,18 @@ def fetch_wechat_article_with_browser(link: str) -> tuple[str, list[str], str]:
     headful = os.getenv("WECHAT_HEADFUL", "").strip().lower() in {"1", "true", "yes"}
     profile = os.getenv("WECHAT_BROWSER_PROFILE", "").strip()
     profile_path = profile or str(DATA_DIR / "wechat-browser")
+    storage_state, temporary_storage_state = prepare_wechat_storage_state()
+    proxy_server = os.getenv("WECHAT_PROXY", "").strip()
+    cookie_header = os.getenv("WECHAT_COOKIE", "").strip()
+    launch_options: dict[str, Any] = {
+        "headless": not headful,
+        "args": ["--disable-http2"],
+    }
+    if proxy_server:
+        launch_options["proxy"] = {"server": proxy_server}
+    executable_path = os.getenv("WECHAT_BROWSER_EXECUTABLE", "").strip()
+    if executable_path:
+        launch_options["executable_path"] = executable_path
     try:
         manual_timeout = int(os.getenv("WECHAT_MANUAL_VERIFY_TIMEOUT", "120"))
     except ValueError:
@@ -210,47 +260,55 @@ def fetch_wechat_article_with_browser(link: str) -> tuple[str, list[str], str]:
     manual_timeout = max(10, manual_timeout)
 
     try:
-        with sync_playwright() as playwright:
-            context = playwright.chromium.launch_persistent_context(
-                profile_path,
-                headless=not headful,
-                args=["--disable-http2"],
-            )
-            try:
-                page = context.pages[0] if context.pages else context.new_page()
-                page.goto(link, wait_until="domcontentloaded", timeout=30_000)
-                if headful:
+        try:
+            with sync_playwright() as playwright:
+                context_options: dict[str, Any] = dict(launch_options)
+                if storage_state:
+                    context_options["storage_state"] = storage_state
+                context = playwright.chromium.launch_persistent_context(
+                    profile_path,
+                    **context_options,
+                )
+                try:
+                    if cookie_header:
+                        context.add_cookies(parse_wechat_cookie_header(cookie_header))
+                    page = context.pages[0] if context.pages else context.new_page()
+                    page.goto(link, wait_until="domcontentloaded", timeout=30_000)
                     try:
                         page.wait_for_selector(
                             "#js_content",
                             state="attached",
-                            timeout=manual_timeout * 1000,
+                            timeout=(manual_timeout if headful else 20) * 1000,
                         )
                     except PlaywrightTimeoutError:
                         LOGGER.warning(
-                            "WeChat manual verification timed out: %s",
+                            "WeChat article body was not rendered: %s",
                             link,
                         )
-                else:
-                    page.wait_for_timeout(3_000)
 
-                resolved_link = unwrap_wechat_article_url(page.url)
-                rendered_html = page.content()
-                if is_wechat_verification_page(resolved_link, rendered_html):
-                    LOGGER.warning("WeChat verification is still required: %s", link)
-                    return "", [], resolved_link
+                    resolved_link = unwrap_wechat_article_url(page.url)
+                    rendered_html = page.content()
+                    if is_wechat_verification_page(resolved_link, rendered_html):
+                        LOGGER.warning("WeChat verification is still required: %s", link)
+                        return "", [], resolved_link
 
-                article_html = extract_wechat_article_html(rendered_html)
-                if not article_html:
-                    return "", [], resolved_link
-                images = html_images(article_html, resolved_link)
-                content = html_to_markdown(article_html, resolved_link)
-                return content, images, resolved_link
-            finally:
-                context.close()
-    except (PlaywrightError, OSError) as exc:
-        LOGGER.warning("WeChat browser fallback failed %s: %s", link, exc)
-        return "", [], link
+                    article_html = extract_wechat_article_html(rendered_html)
+                    if not article_html:
+                        return "", [], resolved_link
+                    images = html_images(article_html, resolved_link)
+                    content = html_to_markdown(article_html, resolved_link)
+                    return content, images, resolved_link
+                finally:
+                    context.close()
+        except (PlaywrightError, OSError) as exc:
+            LOGGER.warning("WeChat browser fallback failed %s: %s", link, exc)
+            return "", [], link
+    finally:
+        if temporary_storage_state:
+            try:
+                os.unlink(temporary_storage_state)
+            except OSError:
+                LOGGER.warning("could not remove temporary WeChat storage state")
 
 
 def entry_html(entry: Mapping[str, Any]) -> str:
@@ -420,10 +478,12 @@ def fetch_article(link: str) -> tuple[str, list[str], str]:
     is_wechat = (urlparse(link).hostname or "").lower() == "mp.weixin.qq.com"
     if is_wechat:
         try:
+            proxy = os.getenv("WECHAT_PROXY", "").strip() or None
             result = parse_wechat_article(
                 link,
                 timeout=TIMEOUT_SECONDS,
                 user_agent=SESSION.headers.get("User-Agent"),
+                proxy=proxy,
             )
             if result.is_valid and result.article_markdown:
                 return (
