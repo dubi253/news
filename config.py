@@ -25,7 +25,7 @@ OUTPUT_PATH = DATA_DIR / "news.json"
 
 TIMEOUT_SECONDS = 20
 MAX_PER_FEED = 15
-MAX_ITEMS = 150
+MAX_ITEMS = 160
 MAX_CONTENT_LENGTH = 50_000
 MAX_IMAGES_PER_ITEM = 5
 MAX_IMAGE_BYTES = 15 * 1024 * 1024
@@ -140,6 +140,13 @@ FEEDS = (
         10,
     ),
 
+    FeedConfig(
+        "social",
+        "微博-热搜榜",
+        "https://decemberpei.cyou/rssbox/weibo-realtimehot.xml",
+        10,
+    ),
+
 
     # ============================================================
     # 2. General Technology: 14
@@ -162,6 +169,12 @@ FEEDS = (
         "https://www.infoq.cn/feed.xml",
         5,
         "Asia/Shanghai",
+    ),
+    FeedConfig(
+        "technology",
+        "GitHubDaily",
+        "https://decemberpei.cyou/rssbox/wechat-githubdaily.xml",
+        5,
     ),
 
     # ============================================================
@@ -211,7 +224,35 @@ FEEDS = (
         "semiconductor",
         "Google News - 晶圆代工与存储器",
         "https://news.google.com/rss/search?q=台积电+OR+三星代工+OR+英特尔代工+OR+中芯国际+OR+联电+OR+格芯+OR+华虹+OR+高塔半导体+OR+世界先进+OR+力积电+OR+SK海力士+OR+美光+OR+铠侠+OR+长鑫存储+OR+长江存储+OR+南亚科技+OR+华邦电子+OR+三星存储&hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
-        8,
+        4,
+    ),
+
+    FeedConfig(
+        "semiconductor",
+        "集微网",
+        "https://decemberpei.cyou/rssbox/ijiwei.xml",
+        10,
+    ),
+
+    FeedConfig(
+        "semiconductor",
+        "半导体行业观察",
+        "https://decemberpei.cyou/rssbox/wechat-bandaotihangyeguancha.xml",
+        6,
+    ),
+
+    FeedConfig(
+        "semiconductor",
+        "半导体芯闻",
+        "https://decemberpei.cyou/rssbox/wechat-bandaotixinwen.xml",
+        6,
+    ),
+
+    FeedConfig(
+        "semiconductor",
+        "芯榜上海",
+        "https://decemberpei.cyou/rssbox/wechat-xinbangshanghai.xml",
+        6,
     ),
 
     # ============================================================
@@ -249,7 +290,7 @@ FEEDS = (
         "semiconductor",
         "Google News - Foundry and Memory",
         "https://news.google.com/rss/search?q=TSMC+OR+%22Samsung+Foundry%22+OR+%22Intel+Foundry%22+OR+SMIC+OR+UMC+OR+GlobalFoundries+OR+%22Hua+Hong%22+OR+%22Tower+Semiconductor%22+OR+VIS+OR+PSMC+OR+X-FAB+OR+%22DB+HiTek%22+OR+%22SK+Hynix%22+OR+Micron+OR+Kioxia+OR+CXMT+OR+YMTC+OR+%22Nanya%22+OR+%22Winbond%22+OR+%22Samsung+Memory%22&hl=en-US&gl=US&ceid=US:en",
-        5,
+        4,
     ),
 )
 
