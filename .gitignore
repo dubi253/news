@@ -33,3 +33,4 @@ dist/
 .vscode/
 
 # Keep generated news snapshots and downloaded images tracked for publishing.
+/data/wechat-browser/
