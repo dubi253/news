@@ -17,7 +17,7 @@ concurrency:
 jobs:
   fetch:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 25
     env:
       UV_INDEX_URL: https://pypi.org/simple
       GOOGLE_TRANSLATE_API_KEY: ${{ secrets.GOOGLE_TRANSLATE_API_KEY }}
@@ -34,13 +34,21 @@ jobs:
       - name: astral-sh/setup-uv
         uses: astral-sh/setup-uv@v10.3.3
         with:
-          python-version: '3.15'
+          python-version: '3.15.2'
 
       - name: Install dependencies
         run: uv sync --locked
 
-      - name: Install Chromium for Google News links
-        run: uv run playwright install chromium
+      - name: Lint
+        run: |
+          uv run --locked ruff format --check .
+          uv run --locked ruff check .
+
+      - name: Test
+        run: uv run --locked python -m unittest discover -s tests
+
+      - name: Install Chromium for JS-rendered articles
+        run: uv run playwright install --with-deps chromium
 
       - name: Fetch news and download images
         run: uv run --locked fetch.py
@@ -60,7 +68,7 @@ jobs:
           git rm -rf .
           mkdir -p data
           cp -a "$snapshot_dir/data/." data/
-          git add data
+          git add -f data
           git commit --allow-empty -m "News snapshot ${tag}"
           git push --force origin HEAD:news
           echo "Published ${tag} to news"
