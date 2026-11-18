@@ -1,4 +1,7 @@
 import unittest
+import json
+import os
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 import fetch
@@ -89,6 +92,29 @@ class FetchTests(unittest.TestCase):
             fetch.unwrap_wechat_article_url(captcha_url),
             "https://mp.weixin.qq.com/s/article",
         )
+
+    def test_parse_wechat_cookie_header(self):
+        cookies = fetch.parse_wechat_cookie_header(
+            "wxuin=123456; mm_lang=zh_CN"
+        )
+
+        self.assertEqual(cookies[0]["name"], "wxuin")
+        self.assertEqual(cookies[0]["value"], "123456")
+        self.assertEqual(cookies[0]["domain"], ".weixin.qq.com")
+
+    def test_prepare_wechat_storage_state_from_json(self):
+        state = json.dumps({"cookies": [], "origins": []})
+        with patch.dict(os.environ, {"WECHAT_STORAGE_STATE": state}, clear=False):
+            state_path, temporary_path = fetch.prepare_wechat_storage_state()
+
+        try:
+            self.assertTrue(state_path)
+            self.assertTrue(Path(state_path).exists())
+            self.assertEqual(temporary_path, state_path)
+            Path(state_path).unlink()
+        finally:
+            if temporary_path and Path(temporary_path).exists():
+                Path(temporary_path).unlink()
 
     def test_wechat_verification_page_is_detected(self):
         html = "<p>当前环境异常，完成验证后即可继续访问。</p><a>去验证</a>"
