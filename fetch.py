@@ -136,6 +136,44 @@ def absolute_url(value: str | None, base: str) -> str:
     return resolved if resolved.startswith(("http://", "https://")) else ""
 
 
+def unwrap_wechat_article_url(value: str) -> str:
+    """Unwrap an RSS bridge URL to the WeChat article target URL."""
+    parsed = urlparse(value)
+    if (parsed.hostname or "").lower() != "mp.weixin.qq.com":
+        return value
+    if parsed.path != "/mp/wappoc_appmsgcaptcha":
+        return value
+
+    target_url = parse_qs(parsed.query).get("target_url", [""])[0]
+    target = absolute_url(target_url, value)
+    target_parsed = urlparse(target)
+    if (
+        (target_parsed.hostname or "").lower() == "mp.weixin.qq.com"
+        and target_parsed.path.startswith("/s/")
+    ):
+        return target
+    return value
+
+
+def is_wechat_verification_page(url: str, content: str) -> bool:
+    """Detect WeChat anti-bot pages that do not contain article content."""
+    parsed = urlparse(url)
+    if (
+        (parsed.hostname or "").lower() == "mp.weixin.qq.com"
+        and parsed.path == "/mp/wappoc_appmsgcaptcha"
+    ):
+        return True
+
+    marker_text = clean_text(BeautifulSoup(content or "", "lxml").get_text(" ", strip=True))
+    markers = (
+        "当前环境异常",
+        "完成验证后即可继续访问",
+        "去验证",
+        "wappoc_appmsgcaptcha",
+    )
+    return any(marker in marker_text or marker in content for marker in markers)
+
+
 def entry_html(entry: Mapping[str, Any]) -> str:
     """Extract HTML content from an RSS entry."""
     content = entry.get("content") or []
@@ -299,6 +337,7 @@ def rss_images(entry: Mapping[str, Any], base: str) -> list[str]:
 
 def fetch_article(link: str) -> tuple[str, list[str], str]:
     """Fetch a full article when the RSS entry is incomplete."""
+    link = unwrap_wechat_article_url(link)
     try:
         response = SESSION.get(link, timeout=TIMEOUT_SECONDS)
         response.raise_for_status()
@@ -306,7 +345,13 @@ def fetch_article(link: str) -> tuple[str, list[str], str]:
         LOGGER.warning("article fetch failed %s: %s", link, exc)
         return "", [], link
 
-    resolved_link = response.url if response.url.startswith(("http://", "https://")) else link
+    resolved_link = unwrap_wechat_article_url(
+        response.url if response.url.startswith(("http://", "https://")) else link
+    )
+    if is_wechat_verification_page(resolved_link, response.text):
+        LOGGER.warning("WeChat verification page encountered: %s", resolved_link)
+        return "", [], resolved_link
+
     soup = BeautifulSoup(response.text, "lxml")
     page_images = html_images(response.text, resolved_link)
     for tag in soup(["script", "style", "noscript", "svg", "form", "nav", "footer", "header"]):
@@ -507,7 +552,9 @@ def fetch_feed(feed_config: FeedConfig) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     for entry in parsed.entries[: feed_config.limit or MAX_PER_FEED]:
         title = clean_text(entry.get("title"))
-        link = absolute_url(entry.get("link"), feed_config.url)
+        link = unwrap_wechat_article_url(
+            absolute_url(entry.get("link"), feed_config.url)
+        )
         if not title or not link:
             continue
 
@@ -593,7 +640,9 @@ def normalize_entries(
     items: list[dict[str, Any]] = []
     for entry in entries:
         title = clean_text(entry.get("title"))
-        link = absolute_url(entry.get("link"), feed_config.url)
+        link = unwrap_wechat_article_url(
+            absolute_url(entry.get("link"), feed_config.url)
+        )
         if not title or not link:
             continue
 

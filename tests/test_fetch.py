@@ -79,6 +79,45 @@ class FetchTests(unittest.TestCase):
             fetch.published_sort_key(earlier),
         )
 
+    def test_unwrap_wechat_captcha_url(self):
+        captcha_url = (
+            "https://mp.weixin.qq.com/mp/wappoc_appmsgcaptcha"
+            "?poc_token=test&target_url=https%3A%2F%2Fmp.weixin.qq.com%2Fs%2Farticle"
+        )
+
+        self.assertEqual(
+            fetch.unwrap_wechat_article_url(captcha_url),
+            "https://mp.weixin.qq.com/s/article",
+        )
+
+    def test_wechat_verification_page_is_detected(self):
+        html = "<p>当前环境异常，完成验证后即可继续访问。</p><a>去验证</a>"
+
+        self.assertTrue(
+            fetch.is_wechat_verification_page(
+                "https://mp.weixin.qq.com/s/article",
+                html,
+            )
+        )
+
+    def test_fetch_article_drops_wechat_verification_content(self):
+        captcha_url = (
+            "https://mp.weixin.qq.com/mp/wappoc_appmsgcaptcha"
+            "?poc_token=test&target_url=https%3A%2F%2Fmp.weixin.qq.com%2Fs%2Farticle"
+        )
+        response = Mock(
+            url=captcha_url,
+            text="<p>当前环境异常，完成验证后即可继续访问。</p>",
+        )
+        response.raise_for_status.return_value = None
+
+        with patch.object(fetch.SESSION, "get", return_value=response):
+            content, images, resolved_link = fetch.fetch_article(captcha_url)
+
+        self.assertEqual(content, "")
+        self.assertEqual(images, [])
+        self.assertEqual(resolved_link, "https://mp.weixin.qq.com/s/article")
+
     def test_read_more_marker_triggers_full_article_fetch(self):
         content_html = (
             "<p>" + ("A long summary. " * 40) + '</p><a href="/article">Read more</a>'
