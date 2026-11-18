@@ -67,7 +67,7 @@ def clean_text(value: str | None) -> str:
 
 
 def iso_time(value: Any, default_timezone: str | None = None) -> str:
-    """Convert an RSS date to UTC, requiring a timezone for naive values."""
+    """Normalize an RSS date, preserving or applying its configured timezone."""
     if not value:
         return ""
     try:
@@ -83,7 +83,9 @@ def iso_time(value: Any, default_timezone: str | None = None) -> str:
             if not default_timezone:
                 return ""
             parsed = parsed.replace(tzinfo=ZoneInfo(default_timezone))
-        return parsed.astimezone(timezone.utc).isoformat()
+        elif default_timezone:
+            parsed = parsed.astimezone(ZoneInfo(default_timezone))
+        return parsed.isoformat()
     except (TypeError, ValueError, OverflowError, ZoneInfoNotFoundError):
         return ""
 
@@ -110,6 +112,17 @@ def published_time(
             if parsed:
                 return parsed
     return ""
+
+
+def published_sort_key(item: Mapping[str, Any]) -> float:
+    """Sort publication timestamps by instant, regardless of their timezone."""
+    published = item.get("published")
+    if not published:
+        return 0.0
+    try:
+        return datetime.fromisoformat(str(published)).timestamp()
+    except (TypeError, ValueError, OverflowError):
+        return 0.0
 
 
 def absolute_url(value: str | None, base: str) -> str:
@@ -639,7 +652,7 @@ def main() -> None:
                 seen.add(item["link"])
                 items.append(item)
 
-    items.sort(key=lambda item: item["published"] or "", reverse=True)
+    items.sort(key=published_sort_key, reverse=True)
     items = items[:MAX_ITEMS]
     payload = {
         "updated": datetime.now(timezone.utc).isoformat(),
