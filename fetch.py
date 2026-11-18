@@ -22,9 +22,14 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import feedparser
 from gnews import GNews
 from gnews.exceptions import GNewsException
+import httpx
 import requests
 from bs4 import BeautifulSoup
 from bs4.element import NavigableString, Tag
+from wechat_article_parser import (
+    WeChatVerifyError,
+    parse as parse_wechat_article,
+)
 
 from config import (
     BASE_DIR,
@@ -172,6 +177,80 @@ def is_wechat_verification_page(url: str, content: str) -> bool:
         "wappoc_appmsgcaptcha",
     )
     return any(marker in marker_text or marker in content for marker in markers)
+
+
+def extract_wechat_article_html(content: str) -> str:
+    """Extract the WeChat article body when it is available in rendered HTML."""
+    soup = BeautifulSoup(content or "", "lxml")
+    article = soup.find(id="js_content") or soup.find("article") or soup.find("main")
+    if not article:
+        return ""
+    for tag in article(["script", "style", "noscript", "svg", "form", "nav", "footer", "header"]):
+        tag.decompose()
+    return str(article)
+
+
+def fetch_wechat_article_with_browser(link: str) -> tuple[str, list[str], str]:
+    """Fetch a WeChat article with Playwright and a persistent browser session."""
+    try:
+        from playwright.sync_api import Error as PlaywrightError
+        from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        LOGGER.warning("Playwright is unavailable; keeping WeChat article link: %s", link)
+        return "", [], link
+
+    headful = os.getenv("WECHAT_HEADFUL", "").strip().lower() in {"1", "true", "yes"}
+    profile = os.getenv("WECHAT_BROWSER_PROFILE", "").strip()
+    profile_path = profile or str(DATA_DIR / "wechat-browser")
+    try:
+        manual_timeout = int(os.getenv("WECHAT_MANUAL_VERIFY_TIMEOUT", "120"))
+    except ValueError:
+        manual_timeout = 120
+    manual_timeout = max(10, manual_timeout)
+
+    try:
+        with sync_playwright() as playwright:
+            context = playwright.chromium.launch_persistent_context(
+                profile_path,
+                headless=not headful,
+                args=["--disable-http2"],
+            )
+            try:
+                page = context.pages[0] if context.pages else context.new_page()
+                page.goto(link, wait_until="domcontentloaded", timeout=30_000)
+                if headful:
+                    try:
+                        page.wait_for_selector(
+                            "#js_content",
+                            state="attached",
+                            timeout=manual_timeout * 1000,
+                        )
+                    except PlaywrightTimeoutError:
+                        LOGGER.warning(
+                            "WeChat manual verification timed out: %s",
+                            link,
+                        )
+                else:
+                    page.wait_for_timeout(3_000)
+
+                resolved_link = unwrap_wechat_article_url(page.url)
+                rendered_html = page.content()
+                if is_wechat_verification_page(resolved_link, rendered_html):
+                    LOGGER.warning("WeChat verification is still required: %s", link)
+                    return "", [], resolved_link
+
+                article_html = extract_wechat_article_html(rendered_html)
+                if not article_html:
+                    return "", [], resolved_link
+                images = html_images(article_html, resolved_link)
+                content = html_to_markdown(article_html, resolved_link)
+                return content, images, resolved_link
+            finally:
+                context.close()
+    except (PlaywrightError, OSError) as exc:
+        LOGGER.warning("WeChat browser fallback failed %s: %s", link, exc)
+        return "", [], link
 
 
 def entry_html(entry: Mapping[str, Any]) -> str:
@@ -338,11 +417,34 @@ def rss_images(entry: Mapping[str, Any], base: str) -> list[str]:
 def fetch_article(link: str) -> tuple[str, list[str], str]:
     """Fetch a full article when the RSS entry is incomplete."""
     link = unwrap_wechat_article_url(link)
+    is_wechat = (urlparse(link).hostname or "").lower() == "mp.weixin.qq.com"
+    if is_wechat:
+        try:
+            result = parse_wechat_article(
+                link,
+                timeout=TIMEOUT_SECONDS,
+                user_agent=SESSION.headers.get("User-Agent"),
+            )
+            if result.is_valid and result.article_markdown:
+                return (
+                    result.article_markdown,
+                    list(dict.fromkeys(result.images)),
+                    link,
+                )
+        except WeChatVerifyError:
+            LOGGER.warning("WeChat verification page encountered: %s", link)
+        except (httpx.HTTPError, TimeoutError, OSError, TypeError, ValueError) as exc:
+            LOGGER.warning("WeChat article parser failed %s: %s", link, exc)
+
+        return fetch_wechat_article_with_browser(link)
+
     try:
         response = SESSION.get(link, timeout=TIMEOUT_SECONDS)
         response.raise_for_status()
     except requests.RequestException as exc:
         LOGGER.warning("article fetch failed %s: %s", link, exc)
+        if is_wechat:
+            return fetch_wechat_article_with_browser(link)
         return "", [], link
 
     resolved_link = unwrap_wechat_article_url(
@@ -350,6 +452,8 @@ def fetch_article(link: str) -> tuple[str, list[str], str]:
     )
     if is_wechat_verification_page(resolved_link, response.text):
         LOGGER.warning("WeChat verification page encountered: %s", resolved_link)
+        if is_wechat:
+            return fetch_wechat_article_with_browser(link)
         return "", [], resolved_link
 
     soup = BeautifulSoup(response.text, "lxml")

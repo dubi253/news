@@ -105,18 +105,50 @@ class FetchTests(unittest.TestCase):
             "https://mp.weixin.qq.com/mp/wappoc_appmsgcaptcha"
             "?poc_token=test&target_url=https%3A%2F%2Fmp.weixin.qq.com%2Fs%2Farticle"
         )
-        response = Mock(
-            url=captcha_url,
-            text="<p>当前环境异常，完成验证后即可继续访问。</p>",
-        )
-        response.raise_for_status.return_value = None
 
-        with patch.object(fetch.SESSION, "get", return_value=response):
+        with (
+            patch(
+                "fetch.parse_wechat_article",
+                side_effect=fetch.WeChatVerifyError("verification required"),
+            ),
+            patch(
+                "fetch.fetch_wechat_article_with_browser",
+                return_value=("", [], "https://mp.weixin.qq.com/s/article"),
+            ),
+        ):
             content, images, resolved_link = fetch.fetch_article(captcha_url)
 
         self.assertEqual(content, "")
         self.assertEqual(images, [])
         self.assertEqual(resolved_link, "https://mp.weixin.qq.com/s/article")
+
+    def test_fetch_article_uses_open_source_wechat_parser(self):
+        result = Mock(
+            is_valid=True,
+            article_markdown="## 正文\n\n原文内容",
+            images=["https://mmbiz.qpic.cn/test.jpg"],
+        )
+        link = "https://mp.weixin.qq.com/s/article"
+
+        with patch("fetch.parse_wechat_article", return_value=result):
+            content, images, resolved_link = fetch.fetch_article(link)
+
+        self.assertEqual(content, "## 正文\n\n原文内容")
+        self.assertEqual(images, ["https://mmbiz.qpic.cn/test.jpg"])
+        self.assertEqual(resolved_link, link)
+
+    def test_extract_wechat_article_html_prefers_js_content(self):
+        html = (
+            '<html><body><div id="js_content">'
+            '<p>正文</p><img src="https://mmbiz.qpic.cn/mmbiz_jpg/test/640">'
+            "</div><footer>公众号页脚</footer></body></html>"
+        )
+
+        article_html = fetch.extract_wechat_article_html(html)
+        soup = __import__("bs4").BeautifulSoup(article_html, "lxml")
+
+        self.assertEqual(soup.find("p").get_text(), "正文")
+        self.assertIsNone(soup.find("footer"))
 
     def test_read_more_marker_triggers_full_article_fetch(self):
         content_html = (
