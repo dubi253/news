@@ -140,12 +140,12 @@ FEEDS = (
         "https://plink.anyfeeder.com/thepaper",
         10,
     ),
-    FeedConfig(
-        "social",
-        "微博-热搜榜",
-        "https://decemberpei.cyou/rssbox/weibo-realtimehot.xml",
-        10,
-    ),
+    # FeedConfig(
+    #     "social",
+    #     "微博-热搜榜",
+    #     "https://decemberpei.cyou/rssbox/weibo-realtimehot.xml",
+    #     10,
+    # ),
     # ============================================================
     # 3. 通用科技
     # ============================================================
@@ -171,7 +171,7 @@ FEEDS = (
     ),
     FeedConfig(
         "technology",
-        "GitHubDaily",
+        "微信公众号-GitHubDaily",
         "https://decemberpei.cyou/rssbox/wechat-githubdaily.xml",
         5,
     ),
@@ -237,19 +237,19 @@ FEEDS = (
     ),
     FeedConfig(
         "semiconductor",
-        "半导体行业观察",
+        "微信公众号-半导体行业观察",
         "https://decemberpei.cyou/rssbox/wechat-bandaotihangyeguancha.xml",
         6,
     ),
     FeedConfig(
         "semiconductor",
-        "半导体芯闻",
+        "微信公众号-半导体芯闻",
         "https://decemberpei.cyou/rssbox/wechat-bandaotixinwen.xml",
         6,
     ),
     FeedConfig(
         "semiconductor",
-        "芯榜上海",
+        "微信公众号-芯榜上海",
         "https://decemberpei.cyou/rssbox/wechat-xinbangshanghai.xml",
         6,
     ),
