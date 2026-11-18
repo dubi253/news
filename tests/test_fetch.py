@@ -36,17 +36,25 @@ class FetchTests(unittest.TestCase):
 
         self.assertEqual(configured, {"InfoQ 中文": "Asia/Shanghai"})
 
-    def test_published_time_preserves_source_timezone_as_utc(self):
+    def test_published_time_preserves_source_timezone(self):
         entry = {"published": "Mon, 16 Nov 2026 14:00:00 +0800"}
 
-        self.assertEqual(fetch.published_time(entry), "2026-11-16T06:00:00+00:00")
+        self.assertEqual(fetch.published_time(entry), "2026-11-16T14:00:00+08:00")
 
     def test_published_time_uses_configured_timezone_for_naive_source(self):
         entry = {"published": "2026-11-16T14:00:00"}
 
         self.assertEqual(
             fetch.published_time(entry, "Asia/Shanghai"),
-            "2026-11-16T06:00:00+00:00",
+            "2026-11-16T14:00:00+08:00",
+        )
+
+    def test_published_time_converts_aware_source_to_configured_timezone(self):
+        entry = {"published": "2026-11-16T06:00:00+00:00"}
+
+        self.assertEqual(
+            fetch.published_time(entry, "Asia/Shanghai"),
+            "2026-11-16T14:00:00+08:00",
         )
 
     def test_published_time_does_not_assume_utc_for_naive_source(self):
@@ -59,7 +67,16 @@ class FetchTests(unittest.TestCase):
 
         self.assertEqual(
             fetch.published_time(entry, "Asia/Shanghai"),
-            "2026-11-16T06:00:00+00:00",
+            "2026-11-16T14:00:00+08:00",
+        )
+
+    def test_published_sort_key_compares_timezone_offsets_by_instant(self):
+        later = {"published": "2026-11-16T06:00:00+00:00"}
+        earlier = {"published": "2026-11-16T13:00:00+08:00"}
+
+        self.assertGreater(
+            fetch.published_sort_key(later),
+            fetch.published_sort_key(earlier),
         )
 
     def test_read_more_marker_triggers_full_article_fetch(self):
