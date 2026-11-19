@@ -106,13 +106,13 @@ FEEDS = (
         "international",
         "联合早报国际",
         "https://plink.anyfeeder.com/zaobao/realtime/world",
-        5,
+        6,
     ),
     FeedConfig(
         "international",
         "纽约时报国际",
         "https://rss.nytimes.com/services/xml/rss/nyt/World.xml",
-        5,
+        4,
     ),
     # ============================================================
     # 2. 中文主流媒体
@@ -127,7 +127,7 @@ FEEDS = (
         "china",
         "财富中文网",
         "https://plink.anyfeeder.com/fortunechina",
-        10,
+        5,
     ),
     FeedConfig(
         "china",
@@ -145,14 +145,38 @@ FEEDS = (
         "china",
         "澎湃新闻",
         "https://plink.anyfeeder.com/thepaper",
-        10,
+        5,
     ),
-    # FeedConfig(
-    #     "social",
-    #     "微博-热搜榜",
-    #     "https://decemberpei.cyou/rssbox/weibo-realtimehot.xml",
-    #     10,
-    # ),
+    FeedConfig(
+        "shanghai",
+        "微信公众号-上海发布",
+        "https://decemberpei.cyou/rssbox/wechat-shanghaifabu.xml",
+        2,
+    ),
+    FeedConfig(
+        "Knowledge",
+        "微信公众号-地球知识局",
+        "https://decemberpei.cyou/rssbox/wechat-diqiuzhishiju.xml",
+        2,
+    ),
+    FeedConfig(
+        "Knowledge",
+        "微信公众号-星球研究所",
+        "https://decemberpei.cyou/rssbox/wechat-xingqiuyanjiusuo.xml",
+        2,
+    ),
+    FeedConfig(
+        "Knowledge",
+        "微信公众号-环球科学",
+        "https://decemberpei.cyou/rssbox/wechat-huanqiukexue.xml",
+        2,
+    ),
+    FeedConfig(
+        "Knowledge",
+        "微信公众号-丁香医生",
+        "https://decemberpei.cyou/rssbox/wechat-dingxiangyisheng.xml",
+        2,
+    ),
     # ============================================================
     # 3. 通用科技
     # ============================================================
