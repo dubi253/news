@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
-from collections.abc import Iterable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -237,10 +237,3 @@ def close() -> None:
             LOGGER.debug("stop playwright failed")
     _STATE["browser"] = None
     _STATE["playwright"] = None
-
-
-def image_refs_within(images: Iterable[ImageRef], min_width: int, min_height: int) -> list[str]:
-    """挑出渲染尺寸达标的图片地址。"""
-    return [
-        image.url for image in images if image.width >= min_width and image.height >= min_height
-    ]

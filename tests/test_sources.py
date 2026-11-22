@@ -6,7 +6,7 @@ from unittest.mock import Mock, patch
 
 from config import FeedConfig
 from newsfetch import feeds, googlenews, wechat
-from newsfetch.models import Article, Candidate
+from newsfetch.models import Article, Candidate, NewsItem
 
 
 class WeChatTests(unittest.TestCase):
@@ -118,11 +118,14 @@ class FeedPipelineTests(unittest.TestCase):
         ):
             item = feeds.build_item(entry, feed)
 
+        assert item is not None
         self.assertEqual(item["link"], "https://publisher.example/a")
         self.assertEqual(item["content"], "完整正文" * 100)
         self.assertEqual(item["images"], ["data/images/x.jpg"])
         self.assertEqual(item["published"], "2026-11-16T14:00:00+08:00")
         self.assertEqual(item["source"], "Test")
+        # 产物字段必须与 NewsItem 契约一一对应，新增字段时同步改契约与本文档。
+        self.assertEqual(set(item), set(NewsItem.__annotations__))
 
     def test_entry_without_title_or_link_is_skipped(self):
         feed = FeedConfig("test", "Test", "https://example.com/feed", 1)

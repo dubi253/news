@@ -19,7 +19,7 @@ from config import (
 )
 from newsfetch import article as article_fetcher
 from newsfetch import dates, extract, googlenews, http, images, wechat
-from newsfetch.models import Candidate
+from newsfetch.models import Candidate, NewsItem
 from newsfetch.text import clean_text, detect_language
 from newsfetch.translate import to_chinese
 from newsfetch.urls import absolute_url
@@ -64,7 +64,7 @@ def _collect_candidates(
     return images.collect_from_html(entry_content_html, link) + images.collect_from_rss(entry, link)
 
 
-def build_item(entry: Mapping[str, Any], feed_config: FeedConfig) -> dict[str, Any] | None:
+def build_item(entry: Mapping[str, Any], feed_config: FeedConfig) -> NewsItem | None:
     """把一个条目转换成产物条目；缺少标题或链接时返回 None。"""
     title = clean_text(entry.get("title"))
     link = absolute_url(entry.get("link") or entry.get("id"), feed_config.url)
@@ -100,10 +100,10 @@ def build_item(entry: Mapping[str, Any], feed_config: FeedConfig) -> dict[str, A
     }
 
 
-def fetch_feed(feed_config: FeedConfig) -> list[dict[str, Any]]:
+def fetch_feed(feed_config: FeedConfig) -> list[NewsItem]:
     """抓取单个订阅源，返回规范化后的条目列表。"""
     LOGGER.info("抓取订阅源 %s", feed_config.source)
-    items: list[dict[str, Any]] = []
+    items: list[NewsItem] = []
     for entry in _load_entries(feed_config)[: _limit(feed_config)]:
         item = build_item(entry, feed_config)
         if item is not None:

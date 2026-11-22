@@ -9,6 +9,7 @@ from unittest.mock import Mock, patch
 import fetch
 from config import FeedConfig
 from newsfetch import http
+from newsfetch.models import NewsItem
 
 
 class BlockDetectionTests(unittest.TestCase):
@@ -49,6 +50,13 @@ class BlockDetectionTests(unittest.TestCase):
 
 
 class SnapshotTests(unittest.TestCase):
+    def test_item_contract_is_documented_fields(self):
+        # data/news.json 的字段只增不改；改名必须同时更新 AGENTS.md 与迁移说明。
+        self.assertEqual(
+            set(NewsItem.__annotations__),
+            {"category", "source", "title", "language", "published", "link", "content", "images"},
+        )
+
     def test_snapshot_contract(self):
         items = [
             {"category": "technology", "link": "https://a.test/1"},

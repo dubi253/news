@@ -13,7 +13,7 @@ from newsfetch import images
 from newsfetch.models import Candidate
 
 
-def _png(width: int, height: int, seed: int = 0) -> bytes:
+def _png(width: int, height: int) -> bytes:
     """生成体积足够大的伪随机 PNG，避免被 MIN_IMAGE_BYTES 过滤掉。"""
     pixels = os.urandom(width * height * 3)
     image = Image.frombytes("RGB", (width, height), pixels)

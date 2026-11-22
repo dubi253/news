@@ -22,6 +22,7 @@ from pathlib import Path
 from config import DATA_DIR, FEEDS, IMAGE_DIR, MAX_ITEMS, OUTPUT_PATH, FeedConfig
 from newsfetch import browser, dates
 from newsfetch.feeds import fetch_feed
+from newsfetch.models import NewsItem
 
 LOGGER = logging.getLogger("newsfetch")
 
@@ -44,12 +45,12 @@ def reset_image_dir() -> None:
     IMAGE_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def write_snapshot(items: list[dict[str, object]]) -> None:
+def write_snapshot(items: Sequence[NewsItem]) -> None:
     """原子地写入 news.json。"""
     payload = {
         "updated": datetime.now(UTC).isoformat(),
         "count": len(items),
-        "categories": sorted({str(item["category"]) for item in items}),
+        "categories": sorted({item["category"] for item in items}),
         "items": items,
     }
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -61,14 +62,16 @@ def write_snapshot(items: list[dict[str, object]]) -> None:
     os.replace(temporary_path, OUTPUT_PATH)
 
 
-def collect(feeds: Sequence[FeedConfig]) -> list[dict[str, object]]:
+def collect(feeds: Sequence[FeedConfig]) -> list[NewsItem]:
     """抓取全部订阅源并按链接去重。"""
-    items: list[dict[str, object]] = []
+    items: list[NewsItem] = []
     seen: set[str] = set()
     for feed in feeds:
         try:
             feed_items = fetch_feed(feed)
-        except Exception:  # noqa: BLE001 - 单个源失败不应中断整轮抓取
+        except Exception:
+            # 订阅源互相独立：单个源的任何失败都不应中断整轮抓取，
+            # LOGGER.exception 记录完整堆栈便于事后定位。
             LOGGER.exception("订阅源抓取异常: %s", feed.source)
             continue
         for item in feed_items:
