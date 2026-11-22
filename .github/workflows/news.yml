@@ -100,8 +100,10 @@ jobs:
           git rm -rf .
           mkdir -p data
           cp -a "$snapshot_dir/data/." data/
-          # previous-news.json 只是本轮的输入，不进产物分支。
+          # previous-news.json 只是本轮的输入、wechat-browser 是浏览器 profile，
+          # 都不进产物分支。
           rm -f data/previous-news.json
+          rm -rf data/wechat-browser
           git add -f data
           git commit --allow-empty -m "News snapshot ${tag}"
           git push --force origin HEAD:news
