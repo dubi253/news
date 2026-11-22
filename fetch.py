@@ -118,6 +118,39 @@ def summarize(
     return list(stats.values())
 
 
+def select_items(items: Sequence[NewsItem], limit: int) -> list[NewsItem]:
+    """按分类配额挑选条目，再按时间倒序返回。
+
+    单纯按时间截断时，半导体这类源多、更新快的分类会把冷门分类整轮挤出产物；
+    先按 ``limit / 分类数`` 给每个分类保底名额，富余名额再按时间补满。
+
+    Args:
+        items: 已按时间倒序排好的候选条目。
+        limit: 产物总条数上限。
+
+    Returns:
+        选中的条目，仍按时间倒序。
+    """
+    groups: dict[str, list[NewsItem]] = {}
+    for item in items:
+        groups.setdefault(item["category"], []).append(item)
+    if not groups:
+        return []
+    quota = max(1, limit // len(groups))
+    chosen: dict[str, NewsItem] = {}
+    for group in groups.values():
+        for item in group[:quota]:
+            chosen[item["link"]] = item
+    if len(chosen) < limit:
+        for item in items:
+            if len(chosen) >= limit:
+                break
+            chosen.setdefault(item["link"], item)
+    selected = list(chosen.values())
+    selected.sort(key=dates.sort_key, reverse=True)
+    return selected[:limit]
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="抓取分类新闻并下载配图")
     parser.add_argument(
@@ -147,7 +180,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         browser.close()
 
     items.sort(key=dates.sort_key, reverse=True)
-    items = items[:MAX_ITEMS]
+    items = select_items(items, MAX_ITEMS)
     # 过滤订阅源属于本地调试，不做发布守门，否则永远抓不满下限。
     if not args.feed and len(items) < MIN_PUBLISH_ITEMS:
         LOGGER.error(

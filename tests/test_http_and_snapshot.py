@@ -101,6 +101,61 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(errors, {"A": "RuntimeError: boom"})
 
 
+class QuotaSelectionTests(unittest.TestCase):
+    """条目多的大分类不能把冷门分类整轮挤出产物。"""
+
+    @staticmethod
+    def _item(category: str, index: int, published: str) -> NewsItem:
+        return {
+            "category": category,
+            "source": category,
+            "title": f"{category}-{index}",
+            "link": f"https://a.test/{category}/{index}",
+            "published": published,
+            "content": "正文",
+            "images": [],
+            "language": "zh",
+        }
+
+    def test_every_category_keeps_a_quota(self):
+        items = [
+            self._item("semiconductor", index, f"2026-11-22T{index:02d}:00:00+08:00")
+            for index in range(10)
+        ]
+        items += [
+            self._item("shanghai", index, f"2026-11-21T{index:02d}:00:00+08:00")
+            for index in range(10)
+        ]
+        selected = fetch.select_items(items, limit=4)
+        self.assertEqual(len(selected), 4)
+        self.assertEqual({item["category"] for item in selected}, {"semiconductor", "shanghai"})
+
+    def test_leftover_slots_are_filled_by_time(self):
+        items = [
+            self._item("semiconductor", index, "2026-11-22T10:00:00+08:00") for index in range(3)
+        ]
+        items.append(self._item("shanghai", 0, "2026-11-20T10:00:00+08:00"))
+        selected = fetch.select_items(items, limit=3)
+        self.assertEqual(len(selected), 3)
+        self.assertEqual(sum(1 for item in selected if item["category"] == "semiconductor"), 2)
+        self.assertEqual(sum(1 for item in selected if item["category"] == "shanghai"), 1)
+
+    def test_selection_stays_in_time_order(self):
+        items = [
+            self._item("a", 0, "2026-11-20T10:00:00+08:00"),
+            self._item("b", 0, "2026-11-22T10:00:00+08:00"),
+            self._item("a", 1, "2026-11-21T10:00:00+08:00"),
+        ]
+        selected = fetch.select_items(items, limit=3)
+        self.assertEqual(
+            [item["published"][:10] for item in selected],
+            ["2026-11-22", "2026-11-21", "2026-11-20"],
+        )
+
+    def test_empty_input(self):
+        self.assertEqual(fetch.select_items([], limit=10), [])
+
+
 class PublishGuardTests(unittest.TestCase):
     """坏掉的一轮必须失败退出，不能把线上快照覆盖成残缺数据。"""
 
