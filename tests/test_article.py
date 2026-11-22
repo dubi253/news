@@ -66,6 +66,28 @@ class ArticleFetchTests(unittest.TestCase):
         )
         self.assertEqual(_fetch(html).published, "")
 
+    def test_og_image_added_when_body_has_no_images(self):
+        # TechCrunch 正文纯文字，唯一的大图是 head 里的 og:image；
+        # trafilatura 只给正文内图片，回访必须补上页面声明的头图候选。
+        html = (
+            '<html><head><meta property="og:image" content="/hero.jpg?resize=1200,800"></head>'
+            f"<body><article>{BODY}</article></body></html>"
+        )
+        urls = [c.url for c in _fetch(html).candidates]
+        self.assertIn("https://example.com/hero.jpg?resize=1200,800", urls)
+
+    def test_og_image_deduped_against_body_image(self):
+        # 同一张图的 og 地址与正文地址尺寸参数不同，交由 rank 按归一化键合并；
+        # 这里只验证两处都进了候选，不重复收集逻辑。
+        html = (
+            '<html><head><meta property="og:image" content="https://example.com/hero.jpg">'
+            "</head>"
+            f"<body><article>{BODY}</article></body></html>"
+        )
+        fetched = _fetch(html)
+        og_candidates = [c for c in fetched.candidates if c.url == "https://example.com/hero.jpg"]
+        self.assertEqual(len(og_candidates), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

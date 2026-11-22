@@ -215,6 +215,30 @@ def _is_decorative(image: Any) -> bool:
     return any(re.search(rf"\b{re.escape(marker)}\b", text) for marker in NON_ARTICLE_MARKERS)
 
 
+def _meta_candidates(soup: BeautifulSoup, base_url: str) -> list[Candidate]:
+    """从 soup 的 og/twitter 声明收集头图候选。"""
+    candidates: list[Candidate] = []
+    for meta in soup.find_all("meta", attrs={"property": ("og:image", "og:image:url")}):
+        url = absolute_url(meta.get("content"), base_url)
+        if url:
+            candidates.append(Candidate(url, 1200))
+    for meta in soup.find_all("meta", attrs={"name": "twitter:image"}):
+        url = absolute_url(meta.get("content"), base_url)
+        if url:
+            candidates.append(Candidate(url, 600))
+    return candidates
+
+
+def collect_meta_images(value: str, base_url: str) -> list[Candidate]:
+    """只收集页面 og/twitter meta 声明的头图候选。
+
+    回访时 trafilatura 只给出正文内的图；正文纯文字但页面声明了 og:image 的站点
+    （TechCrunch 等）靠这里补上 hero。不扫描全页 <img>：版面扫描图、轮播图这类
+    共享家具会被误当配图（人民日报五个条目挂同一张整版图即是教训）。
+    """
+    return _meta_candidates(BeautifulSoup(value or "", "lxml"), base_url)
+
+
 def collect_from_html(value: str, base_url: str) -> list[Candidate]:
     """从 HTML（正文片段或整页）收集图片候选。
 
@@ -256,14 +280,7 @@ def collect_from_html(value: str, base_url: str) -> list[Candidate]:
                 best = Candidate(best.url, url_width(best.url))
             candidates.append(best)
 
-    for meta in soup.find_all("meta", attrs={"property": ("og:image", "og:image:url")}):
-        url = absolute_url(meta.get("content"), base_url)
-        if url:
-            candidates.append(Candidate(url, 1200))
-    for meta in soup.find_all("meta", attrs={"name": "twitter:image"}):
-        url = absolute_url(meta.get("content"), base_url)
-        if url:
-            candidates.append(Candidate(url, 600))
+    candidates.extend(_meta_candidates(soup, base_url))
     return candidates
 
 

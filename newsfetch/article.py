@@ -14,7 +14,7 @@ import logging
 from bs4 import BeautifulSoup
 
 from config import MIN_ARTICLE_CHARS, MIN_IMAGE_HEIGHT, MIN_IMAGE_WIDTH
-from newsfetch import browser, dates, extract, http, wechat
+from newsfetch import browser, dates, extract, http, images, wechat
 from newsfetch.models import Article, Candidate
 
 LOGGER = logging.getLogger("newsfetch.article")
@@ -62,6 +62,9 @@ def fetch(url: str) -> Article:
     extracted = extract.extract_html(page.html, page.url)
     content = extracted.content
     candidates = [Candidate(image_url) for image_url in extracted.image_urls]
+    # 正文抽取只覆盖正文内的图，头图靠页面 og/twitter 声明补上（TechCrunch 等
+    # 正文纯文字的页面全靠这一处）。
+    candidates.extend(images.collect_meta_images(page.html, page.url))
     # 订阅源不带 pubDate 时（rssbox 镜像等），文章页的声明时间是唯一来源。
     published = _published_from_html(page.html)
 
@@ -72,6 +75,7 @@ def fetch(url: str) -> Article:
             if len(rendered_extract.content) > len(content):
                 content = rendered_extract.content
                 candidates = [Candidate(image_url) for image_url in rendered_extract.image_urls]
+            candidates.extend(images.collect_meta_images(rendered.html, rendered.url))
             candidates.extend(_rendered_candidates(rendered))
             published = published or _published_from_html(rendered.html)
 

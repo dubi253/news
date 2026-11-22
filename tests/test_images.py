@@ -102,6 +102,26 @@ class CandidateSelectionTests(unittest.TestCase):
         url = "https://cdn.example.com/a.jpg?id=42&w=640"
         self.assertEqual(images.upgrade_url(url), "https://cdn.example.com/a.jpg?id=42")
 
+    def test_meta_images_only_read_declarations(self):
+        # 头图候选只认 og/twitter 声明，正文内 <img> 由 collect_from_html 负责；
+        # 全页扫描会把版面扫描图这类共享家具误当配图。
+        html = """
+        <head><meta property="og:image" content="/hero.jpg">
+        <meta property="og:image:url" content="/hero-alt.jpg">
+        <meta name="twitter:image" content="/tw.jpg"></head>
+        <body><img src="/in-body.jpg"></body>
+        """
+        selected = images.collect_meta_images(html, "https://example.com/news/a")
+        self.assertEqual(
+            [c.url for c in selected],
+            [
+                "https://example.com/hero.jpg",
+                "https://example.com/hero-alt.jpg",
+                "https://example.com/tw.jpg",
+            ],
+        )
+        self.assertEqual([c.declared_width for c in selected], [1200, 1200, 600])
+
 
 class DownloadFilterTests(unittest.TestCase):
     def test_low_resolution_and_tiny_images_are_dropped(self):
