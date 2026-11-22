@@ -102,20 +102,20 @@ FEEDS = (
         "international",
         "德国之声中文国际",
         "https://rss.dw.com/rdf/rss-chi-all",
-        5,
+        8,
     ),
     FeedConfig(
         "international",
         "联合早报国际",
         "https://plink.anyfeeder.com/zaobao/realtime/world",
-        6,
+        8,
     ),
-    FeedConfig(
-        "international",
-        "纽约时报国际",
-        "https://rss.nytimes.com/services/xml/rss/nyt/World.xml",
-        4,
-    ),
+    # FeedConfig(
+    #     "international",
+    #     "纽约时报国际",
+    #     "https://rss.nytimes.com/services/xml/rss/nyt/World.xml",
+    #     4,
+    # ),
     # ============================================================
     # 2. 中文主流媒体
     # ============================================================
