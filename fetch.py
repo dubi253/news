@@ -29,7 +29,7 @@ from config import (
     REPORT_PATH,
     FeedConfig,
 )
-from newsfetch import browser, dates
+from newsfetch import browser, dates, dedupe
 from newsfetch.feeds import fetch_feed
 from newsfetch.models import NewsItem
 from newsfetch.report import FeedStats as ReportFeedStats
@@ -97,6 +97,9 @@ def collect(feeds: Sequence[FeedConfig]) -> tuple[list[NewsItem], dict[str, str]
                 continue
             seen.add(link)
             items.append(item)
+    items, merged = dedupe.dedupe(items)
+    if merged:
+        LOGGER.info("合并 %d 条跨源重复稿件", merged)
     return items, errors
 
 
