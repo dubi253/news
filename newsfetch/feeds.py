@@ -79,6 +79,9 @@ def _reusable(previous: Mapping[str, NewsItem] | None, link: str, title: str) ->
         return None
     if len(cached.get("content") or "") < MIN_ARTICLE_CHARS:
         return None
+    # 上一轮没抓到配图的条目不复用：它正是需要重试修好的那批，复用会把缺陷固化。
+    if not cached.get("images"):
+        return None
     if not all((BASE_DIR / path).is_file() for path in cached.get("images") or []):
         return None
     return cached
@@ -122,28 +125,41 @@ def build_item(
     candidates = _collect_candidates(entry, content_html, link)
     published = dates.published_time(entry, feed_config.timezone)
     truncated = extract.has_read_more_marker(content_html)
+    image_limit = MAX_IMAGES_PER_WECHAT_ITEM if wechat.is_wechat_url(link) else MAX_IMAGES_PER_ITEM
+
+    def refresh_from_article() -> None:
+        """回访原文，把正文更长的一份与图片候选并入当前条目。"""
+        fetched = article_fetcher.fetch(link)
+        nonlocal content, published
+        if fetched.content and (truncated or len(fetched.content) > len(content)):
+            content = fetched.content
+        candidates.extend(fetched.candidates)
+        published = published or fetched.published
+
     # 回访原文的四种理由：摘要被截断、正文过短、没有可用大图、没有发布时间。
     # 注意用 rank() 之后的结果判断“有没有图”——RSS 摘要里常带图标级 <img>，
     # 候选非空并不代表有正文配图；公众号镜像不带 pubDate，也只有回原文才有时间。
+    visited = False
     if (
         truncated
         or len(content) < MIN_ARTICLE_CHARS
         or not images.rank(candidates)
         or not published
     ):
-        fetched = article_fetcher.fetch(link)
-        if fetched.content and (truncated or len(fetched.content) > len(content)):
-            content = fetched.content
-        candidates.extend(fetched.candidates)
-        published = published or fetched.published
+        refresh_from_article()
+        visited = True
+
+    local_images = images.download(images.rank(candidates), IMAGE_DIR, image_limit)
+    if not local_images and not visited:
+        # 候选都是“下载后不达标”的站点素材（人民日报的 go_top.png 这类），
+        # rank() 拦不住，只有真的下一遍才知道没有大图；此时再回访原文补图。
+        refresh_from_article()
+        local_images = images.download(images.rank(candidates), IMAGE_DIR, image_limit)
 
     language = detect_language(entry, f"{title}\n{content}")
     if language == "en":
         title, content = to_chinese([title, content])
 
-    selected = images.rank(candidates)
-    image_limit = MAX_IMAGES_PER_WECHAT_ITEM if wechat.is_wechat_url(link) else MAX_IMAGES_PER_ITEM
-    local_images = images.download(selected, IMAGE_DIR, image_limit)
     return {
         "category": feed_config.category,
         "source": feed_config.source,

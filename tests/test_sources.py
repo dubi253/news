@@ -251,11 +251,53 @@ class FeedPipelineTests(unittest.TestCase):
         feed = FeedConfig("test", "Test", "https://publisher.example/feed", 1)
         with (
             patch.object(feeds.article_fetcher, "fetch") as article_fetch,
-            patch.object(feeds.images, "download", return_value=[]),
+            patch.object(feeds.images, "download", return_value=[Path("/repo/data/images/x.jpg")]),
         ):
             feeds.build_item(entry, feed)
 
         article_fetch.assert_not_called()
+
+    def test_entry_whose_images_all_fail_is_revisited(self):
+        # 人民日报的 RSS 摘要里只有 go_top.png 这类站点素材：rank() 拦不住，
+        # 下载后一张也不达标，必须回访原文补图。
+        entry = {
+            "title": "标题",
+            "link": "https://publisher.example/a",
+            "summary": "<p>" + "正文" * 300 + '</p><img src="/go_top.png">',
+            "published": "Mon, 16 Nov 2026 14:00:00 +0800",
+        }
+        feed = FeedConfig("test", "Test", "https://publisher.example/feed", 1)
+        fetched = Article(
+            content="完整正文" * 200,
+            candidates=(Candidate("https://publisher.example/hero.jpg"),),
+            url=entry["link"],
+        )
+        with (
+            patch.object(feeds.article_fetcher, "fetch", return_value=fetched) as article_fetch,
+            patch.object(
+                feeds.images,
+                "download",
+                side_effect=[[], [Path("/repo/data/images/hero.jpg")]],
+            ),
+        ):
+            item = feeds.build_item(entry, feed)
+
+        article_fetch.assert_called_once()
+        assert item is not None
+        self.assertEqual(item["images"], ["data/images/hero.jpg"])
+
+    def test_article_is_visited_only_once(self):
+        # 已经回访过、仍然没有可用图片时不再重复抓同一篇。
+        entry = {"title": "标题", "link": "https://publisher.example/a", "summary": "<p>摘要</p>"}
+        feed = FeedConfig("test", "Test", "https://publisher.example/feed", 1)
+        fetched = Article(content="正文" * 200, candidates=(), url=entry["link"])
+        with (
+            patch.object(feeds.article_fetcher, "fetch", return_value=fetched) as article_fetch,
+            patch.object(feeds.images, "download", return_value=[]),
+        ):
+            feeds.build_item(entry, feed)
+
+        article_fetch.assert_called_once()
 
     def test_wechat_entry_takes_publish_time_from_article(self):
         # rssbox 的公众号镜像只有一个标题，没有 pubDate，只能回原文取时间。
