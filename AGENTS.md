@@ -69,7 +69,8 @@
 - **公众号发布时间**：rssbox 镜像的 RSS 条目没有 `pubDate`，发布时间取文章页脚本里的
   `var ct` / `var oriCreateTime`（Unix 时间戳，按东八区输出）；RSS 自带时间时以 RSS 为准。
 - **图片门槛**：像素尺寸、宽高比、字节数三项同时达标才算正文大图；同一张图的不同
-  分辨率按归一化 URL 去重，只保留最大的一份。阈值放在 `config.py`。
+  分辨率按归一化 URL 去重，只保留最大的一份。阈值放在 `config.py`。公众号文章配图
+  密集，用 `MAX_IMAGES_PER_WECHAT_ITEM` 单独放宽，其他来源仍用 `MAX_IMAGES_PER_ITEM`。
 
 ## 设计与代码风格
 

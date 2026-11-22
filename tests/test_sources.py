@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from config import FeedConfig
+from config import MAX_IMAGES_PER_ITEM, MAX_IMAGES_PER_WECHAT_ITEM, FeedConfig
 from newsfetch import feeds, googlenews, wechat
 from newsfetch.models import Article, Candidate, NewsItem
 
@@ -190,6 +190,40 @@ class FeedPipelineTests(unittest.TestCase):
 
         assert item is not None
         self.assertEqual(item["published"], "2026-11-16T14:00:00+08:00")
+
+    def test_wechat_article_allows_more_images(self):
+        # 公众号正文配图密集，单独放宽上限，其余来源保持默认。
+        entry = {"title": "标题", "link": "https://mp.weixin.qq.com/s/a", "summary": "<p>摘要</p>"}
+        fetched = Article(
+            content="正文" * 200,
+            candidates=(Candidate("https://mmbiz.qpic.cn/a.png"),),
+            url="https://mp.weixin.qq.com/s/a",
+        )
+        feed = FeedConfig("test", "微信公众号-测试", "https://example.com/feed", 1)
+        with (
+            patch.object(feeds.article_fetcher, "fetch", return_value=fetched),
+            patch.object(feeds.images, "download", return_value=[]) as download,
+        ):
+            feeds.build_item(entry, feed)
+
+        self.assertEqual(download.call_args.args[2], MAX_IMAGES_PER_WECHAT_ITEM)
+        self.assertGreater(MAX_IMAGES_PER_WECHAT_ITEM, MAX_IMAGES_PER_ITEM)
+
+    def test_other_sources_keep_default_image_limit(self):
+        entry = {"title": "标题", "link": "https://publisher.example/a", "summary": "<p>摘要</p>"}
+        fetched = Article(
+            content="正文" * 200,
+            candidates=(Candidate("https://publisher.example/hero.jpg"),),
+            url="https://publisher.example/a",
+        )
+        feed = FeedConfig("test", "Test", "https://publisher.example/feed", 1)
+        with (
+            patch.object(feeds.article_fetcher, "fetch", return_value=fetched),
+            patch.object(feeds.images, "download", return_value=[]) as download,
+        ):
+            feeds.build_item(entry, feed)
+
+        self.assertEqual(download.call_args.args[2], MAX_IMAGES_PER_ITEM)
 
     def test_entry_without_title_or_link_is_skipped(self):
         feed = FeedConfig("test", "Test", "https://example.com/feed", 1)

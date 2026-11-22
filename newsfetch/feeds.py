@@ -13,6 +13,7 @@ from config import (
     FEED_HEADERS,
     IMAGE_DIR,
     MAX_IMAGES_PER_ITEM,
+    MAX_IMAGES_PER_WECHAT_ITEM,
     MAX_PER_FEED,
     MIN_ARTICLE_CHARS,
     FeedConfig,
@@ -91,7 +92,8 @@ def build_item(entry: Mapping[str, Any], feed_config: FeedConfig) -> NewsItem | 
         title, content = to_chinese([title, content])
 
     selected = images.rank(candidates)
-    local_images = images.download(selected, IMAGE_DIR, MAX_IMAGES_PER_ITEM)
+    image_limit = MAX_IMAGES_PER_WECHAT_ITEM if wechat.is_wechat_url(link) else MAX_IMAGES_PER_ITEM
+    local_images = images.download(selected, IMAGE_DIR, image_limit)
     return {
         "category": feed_config.category,
         "source": feed_config.source,
