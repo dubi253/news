@@ -60,6 +60,12 @@ NON_ARTICLE_MARKERS = (
     "loading",
     "watermark",
 )
+# CMS 把正文图放在固定目录下，目录名本身带 non-article 词汇（Drupal 的
+# sites/default/files、WordPress 的 wp-content/uploads），匹配前整段剔除，
+# 否则 MIT News 这类站点的正文大图会被当素材全部丢掉。
+CONTENT_DIRECTORIES = re.compile(
+    r"/(?:sites/default/files|wp-content/uploads|system/files|cms/uploads)/"
+)
 # 只影响尺寸/格式的查询参数，去掉后仍指向同一张图。
 RENDITION_QUERY_KEYS = {
     "w",
@@ -108,7 +114,7 @@ URL_WIDTH_DIRECTORY = re.compile(r"/(\d{2,4})(?=[/.?]|$)")
 
 def is_non_article(url: str) -> bool:
     """按 URL 特征排除头像、图标、二维码等站点素材。"""
-    path = urlparse(url).path.lower()
+    path = CONTENT_DIRECTORIES.sub("/", urlparse(url).path.lower())
     return any(re.search(rf"(^|[/_.-]){marker}([/_.-]|$)", path) for marker in NON_ARTICLE_MARKERS)
 
 

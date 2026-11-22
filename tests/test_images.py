@@ -55,6 +55,19 @@ class CandidateSelectionTests(unittest.TestCase):
         self.assertTrue(images.is_non_article("https://example.com/u/avatar_120.png"))
         self.assertFalse(images.is_non_article("https://example.com/photos/2026/hero.jpg"))
 
+    def test_cms_content_directories_are_not_decorative(self):
+        # news.mit.edu 的正文图放在 sites/default/files 下，default 是目录名而非素材标记；
+        # 早先按整条路径匹配，把 MIT News 的图全部丢掉了。
+        self.assertFalse(
+            images.is_non_article("https://news.mit.edu/sites/default/files/images/202610/a.jpg")
+        )
+        self.assertFalse(
+            images.is_non_article("https://example.com/wp-content/uploads/2026/11/hero.jpg")
+        )
+        # 剔除目录后，文件名里的素材标记照常生效。
+        self.assertTrue(images.is_non_article("https://example.com/files/default.jpg"))
+        self.assertTrue(images.is_non_article("https://example.com/sites/default/files/icon.png"))
+
     def test_wechat_image_is_upgraded_to_original(self):
         url = "https://mmbiz.qpic.cn/mmbiz_png/abc/640?wx_fmt=png"
         self.assertTrue(images.upgrade_url(url).endswith("/0?wx_fmt=png"))
