@@ -12,6 +12,7 @@ import requests
 
 import fetch
 from config import FeedConfig
+from newsfetch import feeds as feeds_module
 from newsfetch import http
 from newsfetch.models import NewsItem
 
@@ -205,6 +206,82 @@ class SnapshotTests(unittest.TestCase):
             items, _ = fetch.collect(feeds, workers=2)
 
         self.assertEqual([item["source"] for item in items], ["A", "B"])
+
+
+class FeedFallbackTests(unittest.TestCase):
+    """整源失败时沿用上一轮该源的条目：源挂掉要看得到，已抓到的数据不该跟着丢。"""
+
+    @staticmethod
+    def _item(
+        link: str,
+        *,
+        source: str = "A",
+        published: str = "2026-11-22T10:00:00+08:00",
+        images: tuple[str, ...] = ("data/images/a.jpg",),
+    ) -> NewsItem:
+        return {
+            "category": "a",
+            "source": source,
+            "title": "标题",
+            "language": "zh",
+            "published": published,
+            "link": link,
+            "content": "正文" * 200,
+            "images": list(images),
+        }
+
+    def _collect(self, previous: dict[str, NewsItem], directory: str):
+        feed = FeedConfig("a", "A", "https://a.test/feed")
+        with (
+            patch.object(fetch, "fetch_feed", side_effect=RuntimeError("503 Server Error")),
+            patch.object(feeds_module, "BASE_DIR", Path(directory)),
+        ):
+            return feed, fetch.collect((feed,), previous)
+
+    def test_failed_feed_keeps_previous_items_of_that_source(self):
+        kept = self._item("https://a.test/1")
+        other = self._item("https://a.test/2", source="B")
+        with TemporaryDirectory() as directory:
+            image = Path(directory) / "data/images/a.jpg"
+            image.parent.mkdir(parents=True)
+            image.write_bytes(b"stub")
+            feed, (items, errors) = self._collect(
+                {kept["link"]: kept, other["link"]: other}, directory
+            )
+
+        self.assertEqual([item["link"] for item in items], [kept["link"]])
+        self.assertIn("503", errors[feed.source])
+
+    def test_stale_previous_items_are_dropped(self):
+        # 源长期失效时旧条目会自己过期，否则它会一直占着分类名额。
+        old = self._item("https://a.test/old", published="2026-11-01T10:00:00+08:00")
+        with TemporaryDirectory() as directory:
+            image = Path(directory) / "data/images/a.jpg"
+            image.parent.mkdir(parents=True)
+            image.write_bytes(b"stub")
+            _, (items, errors) = self._collect({old["link"]: old}, directory)
+
+        self.assertEqual(items, [])
+        self.assertIn("503", errors["A"])
+
+    def test_item_without_publish_time_is_kept(self):
+        # 集微网这类源本来就没有发布时间，不能因为判不出新旧就整源丢掉。
+        dateless = self._item("https://a.test/1", published="")
+        with TemporaryDirectory() as directory:
+            image = Path(directory) / "data/images/a.jpg"
+            image.parent.mkdir(parents=True)
+            image.write_bytes(b"stub")
+            _, (items, _) = self._collect({dateless["link"]: dateless}, directory)
+
+        self.assertEqual([item["link"] for item in items], [dateless["link"]])
+
+    def test_missing_local_image_is_not_kept(self):
+        # 图片已被清掉的条目不能沿用，否则产物会引用不存在的文件。
+        item = self._item("https://a.test/1")
+        with TemporaryDirectory() as directory:
+            _, (items, _) = self._collect({item["link"]: item}, directory)
+
+        self.assertEqual(items, [])
 
 
 class QuotaSelectionTests(unittest.TestCase):

@@ -69,26 +69,33 @@ def _collect_candidates(
     return images.collect_from_html(entry_content_html, link) + images.collect_from_rss(entry, link)
 
 
+def is_complete(item: Mapping[str, Any] | None) -> bool:
+    """条目是否完整到不必再回访原文：正文够长、配图仍在本地。
+
+    复用的图片必须还在本地，否则产物会引用不存在的文件；正文太短说明上一轮
+    只拿到了摘要，重新抓一遍更稳妥。同样用于整源失败时沿用上一轮条目。
+    """
+    if not item:
+        return False
+    if len(item.get("content") or "") < MIN_ARTICLE_CHARS:
+        return False
+    cached_images = item.get("images") or []
+    return bool(cached_images) and all((BASE_DIR / path).is_file() for path in cached_images)
+
+
 def _reusable(previous: Mapping[str, NewsItem] | None, link: str, title: str) -> NewsItem | None:
     """上一轮抓到的同一篇稿件，可以直接复用它的正文与图片。
 
     新闻稿一旦发布极少改动，链接和标题都没变就认为内容没变；标题变了说明
-    站点改稿，重新抓一遍更稳妥。复用的图片必须仍在本地，否则产物会引用
-    不存在的文件。
+    站点改稿，重新抓一遍更稳妥。
     """
     if not previous:
         return None
     cached = previous.get(link)
     if cached is None or cached.get("title") != title:
         return None
-    if len(cached.get("content") or "") < MIN_ARTICLE_CHARS:
-        return None
     # 上一轮没抓到配图的条目不复用：它正是需要重试修好的那批，复用会把缺陷固化。
-    if not cached.get("images"):
-        return None
-    if not all((BASE_DIR / path).is_file() for path in cached.get("images") or []):
-        return None
-    return cached
+    return cached if is_complete(cached) else None
 
 
 def build_item(

@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import tempfile
+import time
 from collections.abc import Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
@@ -21,6 +22,7 @@ from pathlib import Path
 
 from config import (
     DATA_DIR,
+    FALLBACK_MAX_AGE_HOURS,
     FEED_WORKERS,
     FEEDS,
     IMAGE_DIR,
@@ -32,7 +34,7 @@ from config import (
     FeedConfig,
 )
 from newsfetch import browser, dates, dedupe
-from newsfetch.feeds import fetch_feed
+from newsfetch.feeds import fetch_feed, is_complete
 from newsfetch.models import NewsItem
 from newsfetch.report import FeedStats as ReportFeedStats
 from newsfetch.report import write_report
@@ -101,15 +103,38 @@ def write_snapshot(items: Sequence[NewsItem]) -> None:
     os.replace(temporary_path, OUTPUT_PATH)
 
 
+def _fallback_items(feed: FeedConfig, previous: Mapping[str, NewsItem]) -> list[NewsItem]:
+    """整源抓取失败时沿用它上一轮的条目，避免一次短暂故障让整个源从产物里消失。
+
+    只沿用完整（正文够长、配图仍在本地）且发布时间在 ``FALLBACK_MAX_AGE_HOURS``
+    以内的条目，源持续失效时旧条目会自己过期；没有发布时间的条目无法判断新旧
+    （集微网这类源本来就不给时间），一并沿用。
+    """
+    deadline = time.time() - FALLBACK_MAX_AGE_HOURS * 3600
+    fallback: list[NewsItem] = []
+    for item in previous.values():
+        if item.get("source") != feed.source or not is_complete(item):
+            continue
+        published = dates.sort_key(item)
+        if published and published < deadline:
+            continue
+        fallback.append(item)
+    return fallback
+
+
 def _fetch_one(feed: FeedConfig, previous: Mapping[str, NewsItem]) -> tuple[list[NewsItem], str]:
-    """抓取单个订阅源；异常只记在本源上，不中断整轮抓取。"""
+    """抓取单个订阅源；异常只记在本源上，不中断整轮抓取。
+
+    失败的源沿用上一轮该源的条目并照常在 report 里记下异常：源挂掉要看得到，
+    但它上一轮已经抓到的好数据不该跟着一起丢。
+    """
     try:
         return fetch_feed(feed, previous), ""
     except Exception as exc:
         # 订阅源互相独立：单个源的任何失败都不应中断整轮抓取，
         # LOGGER.exception 记录完整堆栈便于事后定位。
         LOGGER.exception("订阅源抓取异常: %s", feed.source)
-        return [], f"{type(exc).__name__}: {exc}"
+        return _fallback_items(feed, previous), f"{type(exc).__name__}: {exc}"
 
 
 def collect(
@@ -143,7 +168,6 @@ def collect(
     for feed, (feed_items, error) in zip(feeds, results, strict=True):
         if error:
             errors[feed.source] = error
-            continue
         for item in feed_items:
             link = str(item["link"])
             if link in seen:
