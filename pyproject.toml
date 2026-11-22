@@ -5,6 +5,9 @@ description = "Fetch categorized news with local article images."
 requires-python = ">=3.15"
 dependencies = [
     "beautifulsoup4>=4.14,<5",
+    # text.decode_body 直接调用 charset_normalizer；它虽然是 requests 的传递依赖，
+    # 但被本仓库直接导入，必须显式声明，避免上游换实现时静默失效。
+    "charset-normalizer>=3.5,<4",
     "feedparser>=6.0,<7",
     "googlenewsdecoder>=0.2.2",
     "httpx>=0.28,<1",
@@ -36,5 +39,29 @@ line-length = 100
 target-version = "py315"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "B", "UP", "SIM"]
-ignore = ["E501"]
+select = [
+    "E",   # pycodestyle
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "BLE", # flake8-blind-except：兜底 except 必须就地说明理由
+    "UP",  # pyupgrade
+    "SIM", # flake8-simplify
+    "C4",  # flake8-comprehensions
+    "PIE", # flake8-pie
+    "PERF",# perflint
+    "RET", # flake8-return
+    "N",   # pep8-naming
+    "DTZ", # flake8-datetimez
+    "ARG", # flake8-unused-arguments
+    "RUF", # ruff-specific
+]
+ignore = [
+    "E501",    # 行长由 formatter 统一处理
+    "RUF001",  # 中文注释与文案本身包含全角标点，不是拼写问题
+    "RUF002",
+    "RUF003",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["config", "newsfetch"]

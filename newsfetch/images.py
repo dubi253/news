@@ -134,7 +134,7 @@ def _is_signed_query(query: str) -> bool:
     """查询串里是否带有签名类参数（改一个字符就 401）。"""
     for pair in query.split("&"):
         key = unquote(pair.split("=", 1)[0]).strip().lower()
-        if key in SIGNATURE_QUERY_KEYS or key.startswith("x-amz-") or key.startswith("x-goog-"):
+        if key in SIGNATURE_QUERY_KEYS or key.startswith(("x-amz-", "x-goog-")):
             return True
     return False
 
