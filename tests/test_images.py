@@ -72,6 +72,14 @@ class CandidateSelectionTests(unittest.TestCase):
         url = "https://mmbiz.qpic.cn/mmbiz_png/abc/640?wx_fmt=png"
         self.assertTrue(images.upgrade_url(url).endswith("/0?wx_fmt=png"))
 
+    def test_page_suffix_after_extension_is_removed(self):
+        # 人民日报把版序写在扩展名之后（xxx.jpg.2），服务端只认 xxx.jpg。
+        url = "http://paper.people.com.cn/rmrb/pc/pic/202611/22/abc.jpg.2"
+        self.assertEqual(
+            images.upgrade_url(url), "http://paper.people.com.cn/rmrb/pc/pic/202611/22/abc.jpg"
+        )
+        self.assertEqual(images.normalize_key(url), images.normalize_key(url[:-2]))
+
     def test_normalisation_ignores_rendition_parameters(self):
         left = images.normalize_key("https://cdn.example.com/a.jpg?w=640&q=70")
         right = images.normalize_key("https://cdn.example.com/a.jpg?w=1600")

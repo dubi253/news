@@ -106,6 +106,8 @@ WIDTH_DESCRIPTOR = re.compile(r"(\d{2,5})w$")
 SCALE_DESCRIPTOR = re.compile(r"(\d(?:\.\d)?)x$")
 SIZE_TOKEN = re.compile(r"(?:[-_/])(\d{2,4})x(\d{2,4})(?=[._/-]|$)")
 RESIZED_FILENAME = re.compile(r"-\d{2,4}x\d{2,4}(?=\.\w+$)")
+# 有些站点把版序/副本号写在扩展名之后（人民日报 xxx.jpg.2），服务端不认这个尾巴。
+PAGE_SUFFIX = re.compile(r"(\.(?:jpe?g|png|webp|gif|avif))\.\d+$", re.IGNORECASE)
 # 从 URL 里猜出渲染宽度：WordPress 的 -1024x768 后缀、?w=640、以及 /640/ 这类尺寸目录。
 URL_SIZE_SUFFIX = re.compile(r"(?:[-_])(\d{2,4})x\d{2,4}(?=[._?/-]|$)")
 URL_WIDTH_PARAM = re.compile(r"[?&](?:w|width)=(\d{2,4})")
@@ -156,6 +158,7 @@ def upgrade_url(url: str) -> str:
     if "mmbiz.qpic.cn" in (parsed.hostname or ""):
         path = re.sub(r"/\d{2,4}$", "/0", path)
     path = RESIZED_FILENAME.sub("", path)
+    path = PAGE_SUFFIX.sub(r"\1", path)
     query = parsed.query
     if not _is_signed_query(query):
         query = _strip_rendition_query(query)
