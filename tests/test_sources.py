@@ -111,6 +111,21 @@ class GoogleNewsTests(unittest.TestCase):
             link = "https://news.google.com/rss/articles/CBMiX"
             self.assertEqual(googlenews.resolve_url(link), link)
 
+    def test_feed_request_retries_through_short_blocks(self):
+        # Google News 对数据中心 IP 会短暂 503，单次请求经不起这个窗口。
+        feed_url = "https://news.google.com/rss/search?q=tsmc"
+        with (
+            patch.object(
+                googlenews.http, "get_bytes", return_value=Mock(content=b"<rss />")
+            ) as get_bytes,
+            patch.object(googlenews.feedparser, "parse", return_value=Mock(entries=[])),
+            self.assertRaises(RuntimeError),
+        ):
+            googlenews.fetch_entries(feed_url, 4)
+
+        self.assertEqual(get_bytes.call_args.kwargs["attempts"], googlenews.FEED_ATTEMPTS)
+        self.assertGreater(googlenews.FEED_ATTEMPTS, 2)
+
 
 class ReuseTests(unittest.TestCase):
     """上一轮抓过的稿件直接复用，避免每轮重抓全文与图片。"""

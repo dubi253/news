@@ -67,6 +67,11 @@
   判为爬虫并返回验证页；不要为了“更真实”再引入随机 UA。
 - **反爬分层**：requests → 命中 403/429/验证页/近乎空 HTML → Playwright 渲染。
   判定条件与标记集中在 `http.py`，不要在业务代码里散落字符串判断。
+- **临时故障重试**：`http.get_bytes` 默认只请求一次，传 `attempts` 才按指数退避重试
+  （3 秒起、逐次翻倍、带抖动，上限 30 秒），且只重试 429/5xx 与网络异常，4xx 直接
+  放弃。Google News RSS 显式传 `googlenews.FEED_ATTEMPTS`：Google 对数据中心 IP
+  会间歇返回 503（IP 信誉问题，改 UA、换端点都没用），requests 自带的不到 2 秒的
+  重试窗口撑不过去。
 - **订阅源时区**：多数源给出正确的偏移，直接保留；只有把本地时间误标成 GMT 的源
   （如 InfoQ）才在 `FeedConfig.timezone` 里指定墙上时区，一旦设置就忽略其声明偏移。
 - **正文判定**：短于 `MIN_ARTICLE_CHARS` 视为摘要，需要回访原文；抽取结果若只是

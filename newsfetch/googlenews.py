@@ -20,6 +20,9 @@ from newsfetch.urls import host_of
 LOGGER = logging.getLogger("newsfetch.googlenews")
 GOOGLE_NEWS_HOSTS = frozenset({"news.google.com", "www.news.google.com"})
 RESOLVE_TIMEOUT_MS = 20_000
+# Google News 对数据中心 IP 会间歇返回 503（IP 信誉而非限流），几秒内的重试
+# 常常就能过去；requests 自带的重试窗口不到 2 秒，撑不过这段故障，这里等得更久。
+FEED_ATTEMPTS = 4
 
 
 def is_google_news_url(url: str) -> bool:
@@ -89,7 +92,7 @@ def fetch_entries(feed_url: str, limit: int) -> list[dict[str, Any]]:
         RuntimeError: RSS 请求失败或解析不出条目——静默返回空列表会让 report
             里这个源看起来只是“今天没更新”。
     """
-    response = http.get_bytes(feed_url, headers=FEED_HEADERS)
+    response = http.get_bytes(feed_url, headers=FEED_HEADERS, attempts=FEED_ATTEMPTS)
     if response is None:
         raise RuntimeError(f"Google News 请求失败: {feed_url}")
     parsed = feedparser.parse(response.content)

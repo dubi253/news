@@ -8,6 +8,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
+import requests
+
 import fetch
 from config import FeedConfig
 from newsfetch import http
@@ -63,6 +65,60 @@ class BlockDetectionTests(unittest.TestCase):
 
         self.assertTrue(page.rendered)
         self.assertIn("正文", page.html)
+
+
+class RetryTests(unittest.TestCase):
+    """临时故障（503/断连）要等一会儿再试，永久错误（404）不浪费等待。"""
+
+    @staticmethod
+    def _response(status: int) -> requests.Response:
+        response = requests.Response()
+        response.status_code = status
+        response.url = "https://example.com/feed"
+        return response
+
+    def test_server_error_is_retried(self):
+        with (
+            patch.object(
+                http._SESSION, "get", side_effect=[self._response(503), self._response(200)]
+            ) as get,
+            patch.object(http.time, "sleep") as sleep,
+        ):
+            response = http.get_bytes("https://example.com/feed", attempts=2)
+
+        self.assertIsNotNone(response)
+        self.assertEqual(get.call_count, 2)
+        sleep.assert_called_once()
+
+    def test_connection_error_is_retried_until_attempts_run_out(self):
+        with (
+            patch.object(http._SESSION, "get", side_effect=requests.ConnectionError("boom")) as get,
+            patch.object(http.time, "sleep") as sleep,
+        ):
+            self.assertIsNone(http.get_bytes("https://example.com/feed", attempts=3))
+
+        self.assertEqual(get.call_count, 3)
+        self.assertEqual(sleep.call_count, 2)
+
+    def test_client_error_is_not_retried(self):
+        with (
+            patch.object(http._SESSION, "get", return_value=self._response(404)) as get,
+            patch.object(http.time, "sleep") as sleep,
+        ):
+            self.assertIsNone(http.get_bytes("https://example.com/feed", attempts=3))
+
+        self.assertEqual(get.call_count, 1)
+        sleep.assert_not_called()
+
+    def test_default_single_attempt_keeps_old_behaviour(self):
+        with (
+            patch.object(http._SESSION, "get", side_effect=[self._response(503)]) as get,
+            patch.object(http.time, "sleep") as sleep,
+        ):
+            self.assertIsNone(http.get_bytes("https://example.com/feed"))
+
+        self.assertEqual(get.call_count, 1)
+        sleep.assert_not_called()
 
 
 class SnapshotTests(unittest.TestCase):

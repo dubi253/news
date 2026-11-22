@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import logging
 import os
+import random
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 
@@ -37,6 +39,11 @@ BLOCKED_MARKERS = (
 )
 # 低于该长度的 HTML 基本不可能是正文页。
 MIN_PAGE_HTML = 1_500
+# 可以再等一会儿的状态码：服务端临时故障或限流，重试往往能过。
+RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
+# 应用层重试的退避：首轮等待较短，之后翻倍；抖动让同时失败的订阅源错开重试。
+RETRY_BASE_SECONDS = 3.0
+RETRY_MAX_SECONDS = 30.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,21 +90,74 @@ def session() -> requests.Session:
     return _SESSION
 
 
+def _retryable(exc: requests.RequestException) -> bool:
+    """该异常是否值得重试。
+
+    4xx 里只有 429 值得再等；连接中断、超时、分块编码错误都属于网络抖动。
+    """
+    status = getattr(exc.response, "status_code", None)
+    if status is not None:
+        return status in RETRYABLE_STATUS
+    return isinstance(
+        exc,
+        (
+            requests.ConnectionError,
+            requests.Timeout,
+            requests.exceptions.ChunkedEncodingError,
+        ),
+    )
+
+
+def _retry_delay(attempt: int) -> float:
+    """第 ``attempt`` 次失败后的等待秒数：指数退避加抖动，且不超过上限。"""
+    delay = min(RETRY_BASE_SECONDS * 2 ** (attempt - 1), RETRY_MAX_SECONDS)
+    return random.uniform(delay / 2, delay)
+
+
 def get_bytes(
     url: str,
     *,
     headers: Mapping[str, str] | None = None,
     timeout: int = TIMEOUT_SECONDS,
     stream: bool = False,
+    attempts: int = 1,
 ) -> requests.Response | None:
-    """GET 请求，失败返回 None（仅记录日志，不抛出）。"""
-    try:
-        response = _SESSION.get(url, headers=dict(headers or {}), timeout=timeout, stream=stream)
-        response.raise_for_status()
-        return response
-    except requests.RequestException as exc:
-        LOGGER.warning("请求失败 %s: %s", url, exc)
-        return None
+    """GET 请求，失败返回 None（仅记录日志，不抛出）。
+
+    Args:
+        url: 目标地址。
+        headers: 附加请求头。
+        timeout: 单次请求的超时秒数。
+        stream: 是否流式读取响应体（下载图片用）。
+        attempts: 最多请求次数（含首次）。状态码可重试或网络异常时才继续，
+            按指数退避等待；默认只请求一次，交给调用方决定是否值得等待。
+
+    Returns:
+        成功的响应；重试用尽或遇到不可重试的错误时返回 None。
+    """
+    total = max(1, attempts)
+    for attempt in range(1, total + 1):
+        try:
+            response = _SESSION.get(
+                url, headers=dict(headers or {}), timeout=timeout, stream=stream
+            )
+            response.raise_for_status()
+            return response
+        except requests.RequestException as exc:
+            if attempt >= total or not _retryable(exc):
+                LOGGER.warning("请求失败 %s: %s", url, exc)
+                return None
+            delay = _retry_delay(attempt)
+            LOGGER.info(
+                "请求失败 %s: %s；%.1f 秒后重试（第 %d/%d 次）",
+                url,
+                exc,
+                delay,
+                attempt + 1,
+                total,
+            )
+            time.sleep(delay)
+    return None
 
 
 def looks_blocked(status: int, text: str) -> bool:
