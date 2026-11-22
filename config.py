@@ -31,7 +31,6 @@ class FeedConfig:
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
 IMAGE_DIR = DATA_DIR / "images"
-IMAGE_STAGING_DIR = DATA_DIR / ".images-staging"
 OUTPUT_PATH = DATA_DIR / "news.json"
 REPORT_PATH = DATA_DIR / "report.json"
 # 上一轮快照：存在时用它复用未变化的条目，避免每轮重抓全文与图片。
@@ -52,7 +51,6 @@ MAX_CONTENT_LENGTH = 50_000
 MAX_IMAGES_PER_ITEM = 5
 # 公众号文章配图密集，正文常有大图超过默认上限；单独放宽，其余来源不变。
 MAX_IMAGES_PER_WECHAT_ITEM = 12
-MAX_IMAGE_CANDIDATES = 12
 MAX_IMAGE_BYTES = 15 * 1024 * 1024
 
 # 正文抓取：短于该长度的正文视为摘要，需要回访原文。
