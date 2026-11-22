@@ -26,11 +26,14 @@ from config import (
     MAX_ITEMS,
     MIN_PUBLISH_ITEMS,
     OUTPUT_PATH,
+    REPORT_PATH,
     FeedConfig,
 )
 from newsfetch import browser, dates
 from newsfetch.feeds import fetch_feed
 from newsfetch.models import NewsItem
+from newsfetch.report import FeedStats as ReportFeedStats
+from newsfetch.report import write_report
 
 LOGGER = logging.getLogger("newsfetch")
 
@@ -70,17 +73,23 @@ def write_snapshot(items: Sequence[NewsItem]) -> None:
     os.replace(temporary_path, OUTPUT_PATH)
 
 
-def collect(feeds: Sequence[FeedConfig]) -> list[NewsItem]:
-    """抓取全部订阅源并按链接去重。"""
+def collect(feeds: Sequence[FeedConfig]) -> tuple[list[NewsItem], dict[str, str]]:
+    """抓取全部订阅源并按链接去重。
+
+    Returns:
+        去重后的条目，以及抓取失败的订阅源到异常简述的映射。
+    """
     items: list[NewsItem] = []
     seen: set[str] = set()
+    errors: dict[str, str] = {}
     for feed in feeds:
         try:
             feed_items = fetch_feed(feed)
-        except Exception:
+        except Exception as exc:
             # 订阅源互相独立：单个源的任何失败都不应中断整轮抓取，
             # LOGGER.exception 记录完整堆栈便于事后定位。
             LOGGER.exception("订阅源抓取异常: %s", feed.source)
+            errors[feed.source] = f"{type(exc).__name__}: {exc}"
             continue
         for item in feed_items:
             link = str(item["link"])
@@ -88,7 +97,22 @@ def collect(feeds: Sequence[FeedConfig]) -> list[NewsItem]:
                 continue
             seen.add(link)
             items.append(item)
-    return items
+    return items, errors
+
+
+def summarize(
+    feeds: Sequence[FeedConfig], items: Sequence[NewsItem], errors: dict[str, str]
+) -> list[ReportFeedStats]:
+    """按订阅源统计本轮最终入产物的条目质量，供 report.json 与 CI 汇总使用。"""
+    stats = {feed.source: ReportFeedStats(feed.source, feed.category) for feed in feeds}
+    for item in items:
+        source_stats = stats.get(item["source"])
+        if source_stats is not None:
+            source_stats.add_item(item)
+    for source, error in errors.items():
+        if source in stats:
+            stats[source].error = error
+    return list(stats.values())
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -112,9 +136,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         format="%(asctime)s [%(levelname)s] %(message)s",
     )
 
+    feeds = select_feeds(args.feed)
     reset_image_dir()
     try:
-        items = collect(select_feeds(args.feed))
+        items, errors = collect(feeds)
     finally:
         browser.close()
 
@@ -127,6 +152,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return 1
     write_snapshot(items)
+    write_report(REPORT_PATH, summarize(feeds, items, errors), len(items))
     LOGGER.info("写入 %d 条到 %s", len(items), Path(OUTPUT_PATH))
     return 0
 

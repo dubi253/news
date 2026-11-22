@@ -33,6 +33,7 @@ DATA_DIR = BASE_DIR / "data"
 IMAGE_DIR = DATA_DIR / "images"
 IMAGE_STAGING_DIR = DATA_DIR / ".images-staging"
 OUTPUT_PATH = DATA_DIR / "news.json"
+REPORT_PATH = DATA_DIR / "report.json"
 WECHAT_PROFILE_DIR = DATA_DIR / "wechat-browser"
 
 TIMEOUT_SECONDS = 20

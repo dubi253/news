@@ -89,7 +89,16 @@ class SnapshotTests(unittest.TestCase):
         feeds = (FeedConfig("a", "A", "https://a.test/feed"),)
         duplicate = {"link": "https://a.test/1", "category": "a", "source": "A"}
         with patch.object(fetch, "fetch_feed", return_value=[duplicate, dict(duplicate)]):
-            self.assertEqual(len(fetch.collect(feeds)), 1)
+            items, errors = fetch.collect(feeds)
+        self.assertEqual(len(items), 1)
+        self.assertEqual(errors, {})
+
+    def test_collect_records_feed_errors(self):
+        feeds = (FeedConfig("a", "A", "https://a.test/feed"),)
+        with patch.object(fetch, "fetch_feed", side_effect=RuntimeError("boom")):
+            items, errors = fetch.collect(feeds)
+        self.assertEqual(items, [])
+        self.assertEqual(errors, {"A": "RuntimeError: boom"})
 
 
 class PublishGuardTests(unittest.TestCase):
@@ -99,12 +108,13 @@ class PublishGuardTests(unittest.TestCase):
         with TemporaryDirectory() as directory:
             output = Path(directory) / "news.json"
             with (
-                patch.object(fetch, "collect", return_value=items),
+                patch.object(fetch, "collect", return_value=(items, {})),
                 patch.object(fetch, "select_feeds", return_value=()),
                 patch.object(fetch, "reset_image_dir"),
                 patch.object(fetch.browser, "close"),
                 patch.object(fetch, "DATA_DIR", Path(directory)),
                 patch.object(fetch, "OUTPUT_PATH", output),
+                patch.object(fetch, "REPORT_PATH", Path(directory) / "report.json"),
             ):
                 code = fetch.main(argv)
             written = json.loads(output.read_text(encoding="utf-8")) if output.exists() else None
@@ -113,7 +123,8 @@ class PublishGuardTests(unittest.TestCase):
     @staticmethod
     def _items(count):
         return [
-            {"category": "technology", "link": f"https://a.test/{index}"} for index in range(count)
+            {"category": "technology", "source": "A", "link": f"https://a.test/{index}"}
+            for index in range(count)
         ]
 
     def test_full_run_below_minimum_refuses_to_write(self):

@@ -53,6 +53,14 @@ jobs:
       - name: Fetch news and download images
         run: uv run --locked fetch.py
 
+      - name: Summarize run
+        if: always()
+        shell: bash
+        run: |
+          if [ -f data/report.json ]; then
+            uv run --locked python -m newsfetch.report data/report.json >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Publish latest snapshot only
         shell: bash
         run: |
