@@ -2,8 +2,10 @@
 
 策略由弱到强：
 
-1. 复用 ``wechat-article-parser``（纯 HTTP，快）；
-2. 回落到带登录态的持久化浏览器（复用 cookie / storage state，人工验证只需做一次）；
+1. 复用 ``wechat-article-parser``（纯 HTTP，快）；发布时间取该库解析出的
+   ``article_publish_time``——镜像 RSS 不带 ``pubDate``，只能由文章页提供；
+2. 回落到带登录态的持久化浏览器（复用 cookie / storage state，人工验证只需做一次），
+   此时从页面脚本的 ``var ct`` / ``var oriCreateTime`` 读取同一个时间戳；
 3. 判断是否仍停在验证页，避免把“当前环境异常”写进产物。
 
 相关环境变量：
@@ -19,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import tempfile
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -35,7 +38,7 @@ from config import (
     USER_AGENT,
     WECHAT_PROFILE_DIR,
 )
-from newsfetch import browser, extract
+from newsfetch import browser, dates, extract
 from newsfetch.images import collect_from_html
 from newsfetch.models import Article, Candidate
 from newsfetch.text import clean_text
@@ -49,6 +52,9 @@ VERIFICATION_MARKERS = ("当前环境异常", "完成验证后即可继续访问
 MIN_WECHAT_CHARS = 200
 CONTENT_SELECTOR = "#js_content"
 HEADLESS_VERIFY_TIMEOUT_MS = 20_000
+# 文章页把发布时间写成脚本全局变量；解析库同名字段只走 HTTP 路径，
+# 浏览器兜底拿到的 HTML 没有库入口，这里读同一个变量。
+PUBLISH_TIME_RE = re.compile(r"""var\s+(?:oriCreateTime|ct)\s*=\s*['"](\d{9,})['"]""")
 
 
 def is_wechat_url(url: str) -> bool:
@@ -85,6 +91,14 @@ def article_html(html: str) -> str:
     for tag in node(["script", "style", "noscript", "svg", "form", "nav", "footer", "header"]):
         tag.decompose()
     return str(node)
+
+
+def publish_time(html: str) -> str:
+    """从文章页脚本读出发布时间，返回带偏移的 ISO 8601；读不到时为空串。"""
+    match = PUBLISH_TIME_RE.search(html or "")
+    if match is None:
+        return ""
+    return dates.epoch_time(int(match.group(1)))
 
 
 def parse_cookie_header(value: str) -> list[dict[str, str]]:
@@ -144,7 +158,12 @@ def _with_parser(link: str) -> Article | None:
         return None
     content, inline_images = extract.split_images(result.article_markdown)
     urls = list(dict.fromkeys([*result.images, *inline_images]))
-    return Article(content=content, candidates=tuple(Candidate(url) for url in urls), url=link)
+    return Article(
+        content=content,
+        candidates=tuple(Candidate(url) for url in urls),
+        url=link,
+        published=dates.epoch_time(result.article_publish_time),
+    )
 
 
 def _with_browser(link: str) -> Article | None:
@@ -188,7 +207,12 @@ def _with_browser(link: str) -> Article | None:
         for image in page.images
         if image.width >= MIN_IMAGE_WIDTH and image.height >= MIN_IMAGE_HEIGHT
     ]
-    return Article(content=content, candidates=tuple(candidates), url=resolved)
+    return Article(
+        content=content,
+        candidates=tuple(candidates),
+        url=resolved,
+        published=publish_time(page.html),
+    )
 
 
 def fetch(url: str) -> Article:

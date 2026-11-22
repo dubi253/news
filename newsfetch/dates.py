@@ -76,6 +76,28 @@ def iso_time(value: Any, wall_clock_zone: str | None = None) -> str:
         return ""
 
 
+def epoch_time(value: Any, zone: str = "Asia/Shanghai") -> str:
+    """把 Unix 秒级时间戳转换成带偏移的 ISO 8601。
+
+    微信文章页只给出服务端时间戳，换算后按北京时间呈现，与页面显示的
+    发布时间一致；非法或非正的时间戳返回空串。
+
+    Args:
+        value: 整数或可转换为浮点数的字符串时间戳。
+        zone: 转换后使用的时区，默认 ``Asia/Shanghai``。
+    """
+    try:
+        seconds = float(value)
+    except TypeError, ValueError:
+        return ""
+    if not seconds > 0:
+        return ""
+    try:
+        return datetime.fromtimestamp(seconds, ZoneInfo(zone)).isoformat()
+    except OSError, OverflowError, ValueError, ZoneInfoNotFoundError:
+        return ""
+
+
 def published_time(entry: Mapping[str, Any], wall_clock_zone: str | None = None) -> str:
     """从条目中取出第一个可用的发布时间。"""
     for key in DATE_KEYS:

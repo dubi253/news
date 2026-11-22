@@ -75,12 +75,16 @@ def build_item(entry: Mapping[str, Any], feed_config: FeedConfig) -> NewsItem | 
     content_html = entry_html(entry)
     content = extract.fragment_to_markdown(content_html)
     candidates = _collect_candidates(entry, content_html, link)
+    published = dates.published_time(entry, feed_config.timezone)
     truncated = extract.has_read_more_marker(content_html)
-    if truncated or len(content) < MIN_ARTICLE_CHARS or not candidates:
+    # 公众号镜像 RSS 不带 pubDate，必须回原文才能拿到发布时间。
+    needs_publish_time = not published and wechat.is_wechat_url(link)
+    if truncated or len(content) < MIN_ARTICLE_CHARS or not candidates or needs_publish_time:
         fetched = article_fetcher.fetch(link)
         if fetched.content and (truncated or len(fetched.content) > len(content)):
             content = fetched.content
         candidates.extend(fetched.candidates)
+        published = published or fetched.published
 
     language = detect_language(entry, f"{title}\n{content}")
     if language == "en":
@@ -93,7 +97,7 @@ def build_item(entry: Mapping[str, Any], feed_config: FeedConfig) -> NewsItem | 
         "source": feed_config.source,
         "title": title,
         "language": language,
-        "published": dates.published_time(entry, feed_config.timezone),
+        "published": published,
         "link": link,
         "content": content,
         "images": [f"{IMAGE_PREFIX}/{path.name}" for path in local_images],

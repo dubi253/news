@@ -47,6 +47,15 @@ class PublishedTimeTests(unittest.TestCase):
     def test_invalid_value_returns_empty(self):
         self.assertEqual(dates.published_time({"published": "not a date"}), "")
 
+    def test_epoch_is_rendered_as_beijing_time(self):
+        # 微信文章页脚本里的 var ct / oriCreateTime 是真正的 Unix 时间戳。
+        self.assertEqual(dates.epoch_time(1795231934), "2026-11-21T11:32:14+08:00")
+
+    def test_epoch_accepts_string_and_rejects_bad_values(self):
+        self.assertEqual(dates.epoch_time("1795231934"), "2026-11-21T11:32:14+08:00")
+        for value in (0, -1, "", None, "not a timestamp"):
+            self.assertEqual(dates.epoch_time(value), "")
+
     def test_sort_key_compares_instants(self):
         later = {"published": "2026-11-16T06:00:00+00:00"}
         earlier = {"published": "2026-11-16T13:00:00+08:00"}

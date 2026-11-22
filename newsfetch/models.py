@@ -44,8 +44,17 @@ class Candidate:
 
 @dataclass(frozen=True, slots=True)
 class Article:
-    """一篇抓取到的文章。"""
+    """一篇抓取到的文章。
+
+    Attributes:
+        content: 纯文本 Markdown 正文。
+        candidates: 正文图片候选，未去重、未下载。
+        url: 文章最终地址（可能经过跳转还原）。
+        published: 页面自带的发布时间，带偏移的 ISO 8601；取不到时为空串。
+            订阅源本身没有 pubDate 时（例如公众号镜像 RSS）用它补上。
+    """
 
     content: str
     candidates: tuple[Candidate, ...]
     url: str
+    published: str = ""

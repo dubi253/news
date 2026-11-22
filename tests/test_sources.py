@@ -42,6 +42,7 @@ class WeChatTests(unittest.TestCase):
             is_valid=True,
             article_markdown="# 标题\n\n" + "内容" * 200,
             images=["https://mmbiz.qpic.cn/a.png"],
+            article_publish_time=1795231934,
         )
         with (
             patch.object(wechat, "parse_wechat_article", return_value=result),
@@ -52,11 +53,26 @@ class WeChatTests(unittest.TestCase):
         browser_fetch.assert_not_called()
         self.assertIn("内容", article.content)
         self.assertEqual([c.url for c in article.candidates], ["https://mmbiz.qpic.cn/a.png"])
+        # 公众号镜像 RSS 没有 pubDate，发布时间只能来自文章页。
+        self.assertEqual(article.published, "2026-11-21T11:32:14+08:00")
+
+    def test_publish_time_is_read_from_page_script(self):
+        html = "<script>var svrDate = \"1795334034\";\nvar oriCreateTime = '1795231934';\n</script>"
+        self.assertEqual(wechat.publish_time(html), "2026-11-21T11:32:14+08:00")
+        self.assertEqual(
+            wechat.publish_time('<script>var ct = "1795231934";</script>'),
+            "2026-11-21T11:32:14+08:00",
+        )
+        self.assertEqual(wechat.publish_time("<p>没有时间</p>"), "")
+        self.assertEqual(wechat.publish_time(""), "")
 
     def test_browser_result_is_used_when_parser_hits_captcha(self):
         rendered_page = Mock(
             url="https://mp.weixin.qq.com/s/a",
-            html='<div id="js_content"><p>' + "正文" * 200 + "</p></div>",
+            html=(
+                "<script>var ct = '1795231934';</script>"
+                '<div id="js_content"><p>' + "正文" * 200 + "</p></div>"
+            ),
             images=[],
         )
         with (
@@ -69,6 +85,7 @@ class WeChatTests(unittest.TestCase):
             article = wechat.fetch("https://mp.weixin.qq.com/s/a")
 
         self.assertGreater(len(article.content), 200)
+        self.assertEqual(article.published, "2026-11-21T11:32:14+08:00")
 
 
 class GoogleNewsTests(unittest.TestCase):
@@ -126,6 +143,53 @@ class FeedPipelineTests(unittest.TestCase):
         self.assertEqual(item["source"], "Test")
         # 产物字段必须与 NewsItem 契约一一对应，新增字段时同步改契约与本文档。
         self.assertEqual(set(item), set(NewsItem.__annotations__))
+
+    def test_wechat_entry_takes_publish_time_from_article(self):
+        # rssbox 的公众号镜像只有一个标题，没有 pubDate，只能回原文取时间。
+        entry = {
+            "title": "标题",
+            "link": "https://mp.weixin.qq.com/s/a",
+            "summary": "<p>" + "摘要" * 200 + '</p><img src="https://mmbiz.qpic.cn/a.png">',
+        }
+        fetched = Article(
+            content="正文",
+            candidates=(),
+            url="https://mp.weixin.qq.com/s/a",
+            published="2026-11-21T11:32:14+08:00",
+        )
+        feed = FeedConfig("test", "微信公众号-测试", "https://example.com/feed", 1)
+        with (
+            patch.object(feeds.article_fetcher, "fetch", return_value=fetched) as fetch,
+            patch.object(feeds.images, "download", return_value=[]),
+        ):
+            item = feeds.build_item(entry, feed)
+
+        assert item is not None
+        fetch.assert_called_once()
+        self.assertEqual(item["published"], "2026-11-21T11:32:14+08:00")
+
+    def test_entry_publish_time_wins_over_article(self):
+        entry = {
+            "title": "标题",
+            "link": "https://mp.weixin.qq.com/s/a",
+            "summary": "<p>摘要</p>",
+            "published": "Mon, 16 Nov 2026 14:00:00 +0800",
+        }
+        fetched = Article(
+            content="正文" * 200,
+            candidates=(),
+            url="https://mp.weixin.qq.com/s/a",
+            published="2026-11-21T11:32:14+08:00",
+        )
+        feed = FeedConfig("test", "微信公众号-测试", "https://example.com/feed", 1)
+        with (
+            patch.object(feeds.article_fetcher, "fetch", return_value=fetched),
+            patch.object(feeds.images, "download", return_value=[]),
+        ):
+            item = feeds.build_item(entry, feed)
+
+        assert item is not None
+        self.assertEqual(item["published"], "2026-11-16T14:00:00+08:00")
 
     def test_entry_without_title_or_link_is_skipped(self):
         feed = FeedConfig("test", "Test", "https://example.com/feed", 1)
