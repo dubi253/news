@@ -33,6 +33,7 @@ sys.path.insert(0, str(ROOT))
 import requests  # noqa: E402
 
 from config import BASE_DIR, HEADERS, TIMEOUT_SECONDS  # noqa: E402
+from tools.credentials import write_private_text  # noqa: E402
 
 HOST_SUFFIX = "weixin.qq.com"
 # 微信的会话 cookie 有一部分挂在 .qq.com 上（如 wxuin），一并保留。
@@ -136,9 +137,7 @@ def main() -> int:
     if not output.is_absolute():
         output = BASE_DIR / output
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(
-        json.dumps({"cookies": cookies, "origins": []}, ensure_ascii=False), encoding="utf-8"
-    )
+    write_private_text(output, json.dumps({"cookies": cookies, "origins": []}, ensure_ascii=False))
     print(f"已写入 {output}（{len(cookies)} 条 cookie）")
 
     verified = True if args.no_verify else bool(args.article and verify(args.article, cookies))

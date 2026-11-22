@@ -21,15 +21,19 @@ Playwright 的 storage state，作为 ``WECHAT_STORAGE_STATE`` 机密写进仓�
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 import time
+from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from config import USER_AGENT, WECHAT_PROFILE_DIR  # noqa: E402
 from newsfetch.wechat import CONTENT_SELECTOR, is_verification_page  # noqa: E402
+from tools.credentials import write_private_text  # noqa: E402
 
 HOME_URL = "https://mp.weixin.qq.com/"
 STORAGE_PATH = Path("data/wechat-storage.json")
@@ -60,7 +64,7 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _cookie_header(cookies: list[dict]) -> str:
+def _cookie_header(cookies: Sequence[Mapping[str, Any]]) -> str:
     """把 Playwright 的 cookie 列表拼成可直接塞进环境变量的 Cookie 头。"""
     pairs = [
         f"{cookie['name']}={cookie['value']}"
@@ -70,7 +74,7 @@ def _cookie_header(cookies: list[dict]) -> str:
     return "; ".join(dict.fromkeys(pairs))
 
 
-def _wait_for_article(page, article_url: str, timeout: int) -> bool:
+def _wait_for_article(page: Any, article_url: str, timeout: int) -> bool:
     """轮询到出现正文容器、或验证页消失为止。"""
     deadline = time.monotonic() + timeout
     last_state = ""
@@ -137,13 +141,14 @@ def main() -> int:
                 print("在窗口里完成验证后按回车继续")
                 input()
 
-            context.storage_state(path=str(output))
+            # 不交给 Playwright 落盘：它按 umask 写 0644，会话凭据不该被同机其它用户读到。
+            write_private_text(output, json.dumps(context.storage_state(), ensure_ascii=False))
             cookies = context.cookies()
         finally:
             context.close()
 
     header = _cookie_header(cookies)
-    Path(args.cookie_output).write_text(header, encoding="utf-8")
+    write_private_text(Path(args.cookie_output), header)
     print(f"\n已写入 {output}（{output.stat().st_size} 字节）")
     print(f"已写入 {args.cookie_output}（{len(header)} 字节）")
     print("\n写入 GitHub 机密（在仓库目录执行）：")
