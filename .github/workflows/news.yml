@@ -64,6 +64,19 @@ jobs:
           snapshot_dir="$(mktemp -d)"
           cp -a data "$snapshot_dir/data"
 
+          # 线上快照没有历史（孤儿分支 + force push），条数腰斩时宁可本轮不发布。
+          previous=""
+          if git fetch --depth=1 origin news 2>/dev/null; then
+            previous="$(git show origin/news:data/news.json 2>/dev/null \
+              | python3 -c 'import json,sys;print(json.load(sys.stdin)["count"])' 2>/dev/null \
+              || true)"
+          fi
+          current="$(python3 -c 'import json;print(json.load(open("data/news.json"))["count"])')"
+          if [ -n "$previous" ] && [ "$current" -lt $((previous / 2)) ]; then
+            echo "本轮 ${current} 条不足上一轮 ${previous} 条的一半，放弃发布" >&2
+            exit 1
+          fi
+
           git checkout --orphan news
           git rm -rf .
           mkdir -p data

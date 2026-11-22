@@ -19,7 +19,15 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
-from config import DATA_DIR, FEEDS, IMAGE_DIR, MAX_ITEMS, OUTPUT_PATH, FeedConfig
+from config import (
+    DATA_DIR,
+    FEEDS,
+    IMAGE_DIR,
+    MAX_ITEMS,
+    MIN_PUBLISH_ITEMS,
+    OUTPUT_PATH,
+    FeedConfig,
+)
 from newsfetch import browser, dates
 from newsfetch.feeds import fetch_feed
 from newsfetch.models import NewsItem
@@ -112,6 +120,12 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     items.sort(key=dates.sort_key, reverse=True)
     items = items[:MAX_ITEMS]
+    # 过滤订阅源属于本地调试，不做发布守门，否则永远抓不满下限。
+    if not args.feed and len(items) < MIN_PUBLISH_ITEMS:
+        LOGGER.error(
+            "本轮只得到 %d 条，低于发布下限 %d，放弃写入快照", len(items), MIN_PUBLISH_ITEMS
+        )
+        return 1
     write_snapshot(items)
     LOGGER.info("写入 %d 条到 %s", len(items), Path(OUTPUT_PATH))
     return 0

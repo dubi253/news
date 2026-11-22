@@ -92,5 +92,48 @@ class SnapshotTests(unittest.TestCase):
             self.assertEqual(len(fetch.collect(feeds)), 1)
 
 
+class PublishGuardTests(unittest.TestCase):
+    """坏掉的一轮必须失败退出，不能把线上快照覆盖成残缺数据。"""
+
+    def _run(self, items, argv):
+        with TemporaryDirectory() as directory:
+            output = Path(directory) / "news.json"
+            with (
+                patch.object(fetch, "collect", return_value=items),
+                patch.object(fetch, "select_feeds", return_value=()),
+                patch.object(fetch, "reset_image_dir"),
+                patch.object(fetch.browser, "close"),
+                patch.object(fetch, "DATA_DIR", Path(directory)),
+                patch.object(fetch, "OUTPUT_PATH", output),
+            ):
+                code = fetch.main(argv)
+            written = json.loads(output.read_text(encoding="utf-8")) if output.exists() else None
+        return code, written
+
+    @staticmethod
+    def _items(count):
+        return [
+            {"category": "technology", "link": f"https://a.test/{index}"} for index in range(count)
+        ]
+
+    def test_full_run_below_minimum_refuses_to_write(self):
+        code, written = self._run(self._items(fetch.MIN_PUBLISH_ITEMS - 1), [])
+        self.assertEqual(code, 1)
+        self.assertIsNone(written)
+
+    def test_full_run_above_minimum_writes_snapshot(self):
+        code, written = self._run(self._items(fetch.MIN_PUBLISH_ITEMS), [])
+        self.assertEqual(code, 0)
+        assert written is not None
+        self.assertEqual(written["count"], fetch.MIN_PUBLISH_ITEMS)
+
+    def test_filtered_run_skips_guard(self):
+        # --feed 是本地调试入口，抓到几条就写几条，不受发布下限约束。
+        code, written = self._run(self._items(1), ["--feed", "InfoQ"])
+        self.assertEqual(code, 0)
+        assert written is not None
+        self.assertEqual(written["count"], 1)
+
+
 if __name__ == "__main__":
     unittest.main()

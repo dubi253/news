@@ -39,6 +39,9 @@ TIMEOUT_SECONDS = 20
 BROWSER_TIMEOUT_MS = 30_000
 MAX_PER_FEED = 15
 MAX_ITEMS = 160
+# 整轮抓取少于该条数时说明多数订阅源已经失效（反爬、网络或解析故障），
+# 此时写快照会把线上好数据覆盖成残缺快照，直接失败退出更安全。
+MIN_PUBLISH_ITEMS = 60
 MAX_CONTENT_LENGTH = 50_000
 MAX_IMAGES_PER_ITEM = 5
 # 公众号文章配图密集，正文常有大图超过默认上限；单独放宽，其余来源不变。
