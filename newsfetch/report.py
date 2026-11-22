@@ -53,22 +53,23 @@ class FeedStats:
             self.no_published += 1
 
 
-def build_payload(stats: Sequence[FeedStats], count: int) -> dict[str, Any]:
+def build_payload(stats: Sequence[FeedStats], count: int, reused: int = 0) -> dict[str, Any]:
     """组装 report.json 的内容。"""
     return {
         "updated": datetime.now(UTC).isoformat(),
         "count": count,
+        "reused": reused,
         "feeds": [asdict(entry) for entry in stats],
     }
 
 
-def write_report(path: Path, stats: Sequence[FeedStats], count: int) -> None:
+def write_report(path: Path, stats: Sequence[FeedStats], count: int, reused: int = 0) -> None:
     """原子地写入 report.json。"""
     path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(
         "w", suffix=".json", prefix="report-", dir=path.parent, delete=False, encoding="utf-8"
     ) as handle:
-        json.dump(build_payload(stats, count), handle, ensure_ascii=False, indent=2)
+        json.dump(build_payload(stats, count, reused), handle, ensure_ascii=False, indent=2)
         temporary_path = Path(handle.name)
     os.replace(temporary_path, path)
 
@@ -76,8 +77,11 @@ def write_report(path: Path, stats: Sequence[FeedStats], count: int) -> None:
 def to_markdown(payload: dict[str, Any]) -> str:
     """把统计渲染成 Markdown 表格（供 GitHub Actions job summary）。"""
     feeds = payload.get("feeds") or []
+    header = f"共 {payload.get('count', 0)} 条，覆盖 {len(feeds)} 个订阅源"
+    if payload.get("reused"):
+        header += f"，其中 {payload['reused']} 条复用上一轮"
     lines = [
-        f"共 {payload.get('count', 0)} 条，覆盖 {len(feeds)} 个订阅源",
+        header,
         "",
         "| 来源 | 分类 | 条目 | 空正文 | 无图 | 无时间 | 异常 |",
         "| --- | --- | --- | --- | --- | --- | --- |",

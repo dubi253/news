@@ -50,6 +50,17 @@ jobs:
       - name: Install Chromium for JS-rendered articles
         run: uv run playwright install --with-deps chromium
 
+      - name: Restore previous snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p data
+          # 上一轮快照与图片用于复用：未变化的条目不再回访原文、不再重下图片。
+          if git fetch --depth=1 origin news 2>/dev/null; then
+            git show origin/news:data/news.json > data/previous-news.json
+            git archive origin/news data/images 2>/dev/null | tar -x -C .
+          fi
+
       - name: Fetch news and download images
         run: uv run --locked fetch.py
 
@@ -89,6 +100,8 @@ jobs:
           git rm -rf .
           mkdir -p data
           cp -a "$snapshot_dir/data/." data/
+          # previous-news.json 只是本轮的输入，不进产物分支。
+          rm -f data/previous-news.json
           git add -f data
           git commit --allow-empty -m "News snapshot ${tag}"
           git push --force origin HEAD:news

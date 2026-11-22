@@ -34,6 +34,8 @@ IMAGE_DIR = DATA_DIR / "images"
 IMAGE_STAGING_DIR = DATA_DIR / ".images-staging"
 OUTPUT_PATH = DATA_DIR / "news.json"
 REPORT_PATH = DATA_DIR / "report.json"
+# 上一轮快照：存在时用它复用未变化的条目，避免每轮重抓全文与图片。
+PREVIOUS_PATH = DATA_DIR / "previous-news.json"
 WECHAT_PROFILE_DIR = DATA_DIR / "wechat-browser"
 
 TIMEOUT_SECONDS = 20

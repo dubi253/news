@@ -2,6 +2,7 @@
 
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
 from config import MAX_IMAGES_PER_ITEM, MAX_IMAGES_PER_WECHAT_ITEM, FeedConfig
@@ -109,6 +110,75 @@ class GoogleNewsTests(unittest.TestCase):
         ):
             link = "https://news.google.com/rss/articles/CBMiX"
             self.assertEqual(googlenews.resolve_url(link), link)
+
+
+class ReuseTests(unittest.TestCase):
+    """上一轮抓过的稿件直接复用，避免每轮重抓全文与图片。"""
+
+    def _cached(
+        self, title: str = "标题", images: tuple[str, ...] = ("data/images/a.jpg",)
+    ) -> NewsItem:
+        return {
+            "category": "test",
+            "source": "Test",
+            "title": title,
+            "language": "zh",
+            "published": "2026-11-21T11:32:14+08:00",
+            "link": "https://publisher.example/a",
+            "content": "完整正文" * 200,
+            "images": list(images),
+        }
+
+    def test_cached_item_is_reused_without_network(self):
+        entry = {"title": "标题", "link": "https://publisher.example/a", "summary": "<p>摘要</p>"}
+        feed = FeedConfig("test", "Test", "https://publisher.example/feed", 1)
+        with TemporaryDirectory() as directory:
+            image = Path(directory) / "data/images/a.jpg"
+            image.parent.mkdir(parents=True)
+            image.write_bytes(b"stub")
+            with (
+                patch.object(feeds, "BASE_DIR", Path(directory)),
+                patch.object(feeds.article_fetcher, "fetch") as article_fetch,
+                patch.object(feeds.images, "download") as download,
+            ):
+                item = feeds.build_item(entry, feed, {entry["link"]: self._cached()})
+
+        article_fetch.assert_not_called()
+        download.assert_not_called()
+        assert item is not None
+        self.assertEqual(item["content"], "完整正文" * 200)
+        self.assertEqual(item["images"], ["data/images/a.jpg"])
+
+    def test_missing_local_image_forces_refetch(self):
+        # 复用条目的图片必须还在本地，否则产物会指向不存在的文件。
+        entry = {"title": "标题", "link": "https://publisher.example/a", "summary": "<p>摘要</p>"}
+        feed = FeedConfig("test", "Test", "https://publisher.example/feed", 1)
+        fetched = Article(content="新正文" * 200, candidates=(), url=entry["link"])
+        with (
+            patch.object(feeds, "BASE_DIR", Path("/nonexistent-root")),
+            patch.object(feeds.article_fetcher, "fetch", return_value=fetched) as article_fetch,
+            patch.object(feeds.images, "download", return_value=[]),
+        ):
+            feeds.build_item(entry, feed, {entry["link"]: self._cached()})
+
+        article_fetch.assert_called_once()
+
+    def test_changed_title_forces_refetch(self):
+        entry = {
+            "title": "改过的标题",
+            "link": "https://publisher.example/a",
+            "summary": "<p>摘要</p>",
+        }
+        feed = FeedConfig("test", "Test", "https://publisher.example/feed", 1)
+        fetched = Article(content="新正文" * 200, candidates=(), url=entry["link"])
+        with (
+            patch.object(feeds, "BASE_DIR", Path("/nonexistent-root")),
+            patch.object(feeds.article_fetcher, "fetch", return_value=fetched) as article_fetch,
+            patch.object(feeds.images, "download", return_value=[]),
+        ):
+            feeds.build_item(entry, feed, {entry["link"]: self._cached()})
+
+        article_fetch.assert_called_once()
 
 
 class FeedPipelineTests(unittest.TestCase):
@@ -280,7 +350,9 @@ class FeedPipelineTests(unittest.TestCase):
         with (
             patch.object(feeds.http, "get_bytes", return_value=response),
             patch.object(feeds.feedparser, "parse", return_value=parsed),
-            patch.object(feeds, "build_item", side_effect=lambda entry, _: dict(entry)),
+            patch.object(
+                feeds, "build_item", side_effect=lambda entry, _feed, _previous=None: dict(entry)
+            ),
         ):
             items = feeds.fetch_feed(feed)
 

@@ -120,7 +120,8 @@ class SnapshotTests(unittest.TestCase):
         # 两个源必须同时进入抓取，否则 barrier 超时（串行时第二个永远等不到）。
         barrier = threading.Barrier(2, timeout=5)
 
-        def fake_fetch(feed):
+        def fake_fetch(feed, previous=None):
+            del previous
             barrier.wait()
             return [_entry(feed)]
 
@@ -135,7 +136,8 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual([item["source"] for item in items], ["A", "B"])
 
     def test_concurrent_collect_keeps_feed_order(self):
-        def fake_fetch(feed):
+        def fake_fetch(feed, previous=None):
+            del previous
             time.sleep(0.01 if feed.source == "A" else 0.03)
             return [_entry(feed)]
 
@@ -204,6 +206,76 @@ class QuotaSelectionTests(unittest.TestCase):
         self.assertEqual(fetch.select_items([], limit=10), [])
 
 
+class IncrementalTests(unittest.TestCase):
+    """复用上一轮快照：索引、图片清理与统计。"""
+
+    @staticmethod
+    def _item(link, content="正文" * 200, images=("data/images/keep.jpg",)) -> NewsItem:
+        return {
+            "category": "test",
+            "source": "A",
+            "title": "标题",
+            "language": "zh",
+            "published": "2026-11-22T10:00:00+08:00",
+            "link": link,
+            "content": content,
+            "images": list(images),
+        }
+
+    def test_load_previous_indexes_items_by_link(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "previous-news.json"
+            path.write_text(
+                json.dumps({"items": [self._item("https://a.test/1")]}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            previous = fetch.load_previous(path)
+
+        self.assertEqual(list(previous), ["https://a.test/1"])
+        self.assertEqual(previous["https://a.test/1"]["title"], "标题")
+
+    def test_load_previous_tolerates_missing_and_broken_files(self):
+        self.assertEqual(fetch.load_previous(Path("/nonexistent/previous-news.json")), {})
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "previous.json"
+            path.write_text("{not json", encoding="utf-8")
+            self.assertEqual(fetch.load_previous(path), {})
+
+    def test_prune_images_keeps_only_referenced_files(self):
+        with TemporaryDirectory() as directory:
+            image_dir = Path(directory) / "images"
+            image_dir.mkdir()
+            (image_dir / "keep.jpg").write_bytes(b"x")
+            (image_dir / "drop.jpg").write_bytes(b"x")
+            with patch.object(fetch, "IMAGE_DIR", image_dir):
+                removed = fetch.prune_images([self._item("https://a.test/1")])
+            remaining = sorted(path.name for path in image_dir.iterdir())
+
+        self.assertEqual(removed, 1)
+        self.assertEqual(remaining, ["keep.jpg"])
+
+    def test_reused_count_reaches_report(self):
+        items = [self._item(f"https://a.test/{index}") for index in range(2)]
+        previous = {item["link"]: dict(item) for item in items}
+        with TemporaryDirectory() as directory:
+            report_path = Path(directory) / "report.json"
+            with (
+                patch.object(fetch, "collect", return_value=(items, {})),
+                patch.object(fetch, "select_feeds", return_value=()),
+                patch.object(fetch, "prepare_image_dir"),
+                patch.object(fetch, "prune_images", return_value=0),
+                patch.object(fetch, "load_previous", return_value=previous),
+                patch.object(fetch.browser, "close"),
+                patch.object(fetch, "DATA_DIR", Path(directory)),
+                patch.object(fetch, "OUTPUT_PATH", Path(directory) / "news.json"),
+                patch.object(fetch, "REPORT_PATH", report_path),
+            ):
+                fetch.main(["--feed", "A"])
+            payload = json.loads(report_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(payload["reused"], 2)
+
+
 class PublishGuardTests(unittest.TestCase):
     """坏掉的一轮必须失败退出，不能把线上快照覆盖成残缺数据。"""
 
@@ -213,7 +285,9 @@ class PublishGuardTests(unittest.TestCase):
             with (
                 patch.object(fetch, "collect", return_value=(items, {})),
                 patch.object(fetch, "select_feeds", return_value=()),
-                patch.object(fetch, "reset_image_dir"),
+                patch.object(fetch, "prepare_image_dir"),
+                patch.object(fetch, "prune_images", return_value=0),
+                patch.object(fetch, "load_previous", return_value={}),
                 patch.object(fetch.browser, "close"),
                 patch.object(fetch, "DATA_DIR", Path(directory)),
                 patch.object(fetch, "OUTPUT_PATH", output),

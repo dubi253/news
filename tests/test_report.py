@@ -71,7 +71,7 @@ class ReportTests(unittest.TestCase):
             payload = json.loads(path.read_text(encoding="utf-8"))
 
         self.assertEqual(payload["count"], 2)
-        self.assertEqual(set(payload), {"updated", "count", "feeds"})
+        self.assertEqual(set(payload), {"updated", "count", "reused", "feeds"})
         self.assertEqual(payload["feeds"][0]["source"], "A")
         self.assertEqual(payload["feeds"][0]["no_images"], 1)
 

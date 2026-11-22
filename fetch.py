@@ -13,9 +13,8 @@ import argparse
 import json
 import logging
 import os
-import shutil
 import tempfile
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
@@ -28,6 +27,7 @@ from config import (
     MAX_ITEMS,
     MIN_PUBLISH_ITEMS,
     OUTPUT_PATH,
+    PREVIOUS_PATH,
     REPORT_PATH,
     FeedConfig,
 )
@@ -51,11 +51,37 @@ def select_feeds(filters: Sequence[str]) -> tuple[FeedConfig, ...]:
     )
 
 
-def reset_image_dir() -> None:
-    """清空旧的图片目录，保证产物与这一轮抓取一致。"""
-    if IMAGE_DIR.exists():
-        shutil.rmtree(IMAGE_DIR)
+def prepare_image_dir() -> None:
+    """准备图片目录。
+
+    上一轮的图片保留在原处（文件名由内容哈希决定，复用的条目直接引用它们），
+    本轮结束后由 ``prune_images`` 删掉产物不再引用的文件，目录仍然与快照一致。
+    """
     IMAGE_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def prune_images(items: Sequence[NewsItem]) -> int:
+    """删除产物未引用的图片，返回删除数量。"""
+    referenced = {Path(path).name for item in items for path in item["images"]}
+    removed = 0
+    for path in IMAGE_DIR.iterdir():
+        if path.is_file() and path.name not in referenced:
+            path.unlink()
+            removed += 1
+    return removed
+
+
+def load_previous(path: Path) -> dict[str, NewsItem]:
+    """读取上一轮快照，返回 link → 条目索引；文件缺失或损坏时返回空索引。"""
+    if not path.is_file():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        entries = payload.get("items") or []
+    except (OSError, ValueError) as exc:
+        LOGGER.warning("无法读取上一轮快照 %s: %s", path, exc)
+        return {}
+    return {str(item["link"]): item for item in entries if item.get("link")}
 
 
 def write_snapshot(items: Sequence[NewsItem]) -> None:
@@ -75,10 +101,10 @@ def write_snapshot(items: Sequence[NewsItem]) -> None:
     os.replace(temporary_path, OUTPUT_PATH)
 
 
-def _fetch_one(feed: FeedConfig) -> tuple[list[NewsItem], str]:
+def _fetch_one(feed: FeedConfig, previous: Mapping[str, NewsItem]) -> tuple[list[NewsItem], str]:
     """抓取单个订阅源；异常只记在本源上，不中断整轮抓取。"""
     try:
-        return fetch_feed(feed), ""
+        return fetch_feed(feed, previous), ""
     except Exception as exc:
         # 订阅源互相独立：单个源的任何失败都不应中断整轮抓取，
         # LOGGER.exception 记录完整堆栈便于事后定位。
@@ -87,7 +113,9 @@ def _fetch_one(feed: FeedConfig) -> tuple[list[NewsItem], str]:
 
 
 def collect(
-    feeds: Sequence[FeedConfig], workers: int = FEED_WORKERS
+    feeds: Sequence[FeedConfig],
+    previous: Mapping[str, NewsItem] | None = None,
+    workers: int = FEED_WORKERS,
 ) -> tuple[list[NewsItem], dict[str, str]]:
     """并发抓取全部订阅源，按链接去重后返回。
 
@@ -96,16 +124,18 @@ def collect(
 
     Args:
         feeds: 要抓取的订阅源。
+        previous: 上一轮快照索引，命中时该条目直接复用。
         workers: 并发线程数，1 表示串行。
 
     Returns:
         去重后的条目，以及抓取失败的订阅源到异常简述的映射。
     """
+    cached = previous or {}
     if workers > 1 and len(feeds) > 1:
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            results = list(pool.map(_fetch_one, feeds))
+            results = list(pool.map(lambda feed: _fetch_one(feed, cached), feeds))
     else:
-        results = [_fetch_one(feed) for feed in feeds]
+        results = [_fetch_one(feed, cached) for feed in feeds]
 
     items: list[NewsItem] = []
     seen: set[str] = set()
@@ -174,6 +204,11 @@ def select_items(items: Sequence[NewsItem], limit: int) -> list[NewsItem]:
     return selected[:limit]
 
 
+def previous_path() -> Path:
+    """上一轮快照的位置，允许用 NEWS_PREVIOUS_JSON 指向 CI 还原出来的副本。"""
+    return Path(os.environ.get("NEWS_PREVIOUS_JSON", "") or PREVIOUS_PATH)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="抓取分类新闻并下载配图")
     parser.add_argument(
@@ -203,9 +238,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
 
     feeds = select_feeds(args.feed)
-    reset_image_dir()
+    previous = load_previous(previous_path())
+    prepare_image_dir()
     try:
-        items, errors = collect(feeds, workers=max(1, args.workers))
+        items, errors = collect(feeds, previous, workers=max(1, args.workers))
     finally:
         browser.close()
 
@@ -218,8 +254,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return 1
     write_snapshot(items)
-    write_report(REPORT_PATH, summarize(feeds, items, errors), len(items))
-    LOGGER.info("写入 %d 条到 %s", len(items), Path(OUTPUT_PATH))
+    removed = prune_images(items)
+    reused = sum(
+        1
+        for item in items
+        if previous.get(item["link"], {}).get("content") == item.get("content")
+        and item.get("content")
+    )
+    write_report(REPORT_PATH, summarize(feeds, items, errors), len(items), reused=reused)
+    LOGGER.info(
+        "写入 %d 条到 %s（复用 %d 条，清理 %d 张旧图）",
+        len(items),
+        Path(OUTPUT_PATH),
+        reused,
+        removed,
+    )
     return 0
 
 

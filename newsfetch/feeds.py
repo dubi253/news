@@ -65,13 +65,57 @@ def _collect_candidates(
     return images.collect_from_html(entry_content_html, link) + images.collect_from_rss(entry, link)
 
 
-def build_item(entry: Mapping[str, Any], feed_config: FeedConfig) -> NewsItem | None:
-    """把一个条目转换成产物条目；缺少标题或链接时返回 None。"""
+def _reusable(previous: Mapping[str, NewsItem] | None, link: str, title: str) -> NewsItem | None:
+    """上一轮抓到的同一篇稿件，可以直接复用它的正文与图片。
+
+    新闻稿一旦发布极少改动，链接和标题都没变就认为内容没变；标题变了说明
+    站点改稿，重新抓一遍更稳妥。复用的图片必须仍在本地，否则产物会引用
+    不存在的文件。
+    """
+    if not previous:
+        return None
+    cached = previous.get(link)
+    if cached is None or cached.get("title") != title:
+        return None
+    if len(cached.get("content") or "") < MIN_ARTICLE_CHARS:
+        return None
+    if not all((BASE_DIR / path).is_file() for path in cached.get("images") or []):
+        return None
+    return cached
+
+
+def build_item(
+    entry: Mapping[str, Any],
+    feed_config: FeedConfig,
+    previous: Mapping[str, NewsItem] | None = None,
+) -> NewsItem | None:
+    """把一个条目转换成产物条目；缺少标题或链接时返回 None。
+
+    Args:
+        entry: RSS 条目。
+        feed_config: 该条目所属的订阅源配置。
+        previous: 上一轮快照的 link → 条目索引，命中时直接复用，省掉回访原文。
+
+    Returns:
+        产物条目；标题或链接缺失时返回 None。
+    """
     title = clean_text(entry.get("title"))
     link = absolute_url(entry.get("link") or entry.get("id"), feed_config.url)
     if not title or not link:
         return None
     link = wechat.unwrap_captcha_url(googlenews.resolve_url(link))
+    cached = _reusable(previous, link, title)
+    if cached is not None:
+        return {
+            "category": feed_config.category,
+            "source": feed_config.source,
+            "title": cached["title"],
+            "language": cached["language"],
+            "published": cached["published"],
+            "link": cached["link"],
+            "content": cached["content"],
+            "images": list(cached["images"]),
+        }
 
     content_html = entry_html(entry)
     content = extract.fragment_to_markdown(content_html)
@@ -112,12 +156,19 @@ def build_item(entry: Mapping[str, Any], feed_config: FeedConfig) -> NewsItem | 
     }
 
 
-def fetch_feed(feed_config: FeedConfig) -> list[NewsItem]:
-    """抓取单个订阅源，返回规范化后的条目列表。"""
+def fetch_feed(
+    feed_config: FeedConfig, previous: Mapping[str, NewsItem] | None = None
+) -> list[NewsItem]:
+    """抓取单个订阅源，返回规范化后的条目列表。
+
+    Args:
+        feed_config: 订阅源配置。
+        previous: 上一轮快照索引，命中时该条目直接复用，不再回访原文。
+    """
     LOGGER.info("抓取订阅源 %s", feed_config.source)
     items: list[NewsItem] = []
     for entry in _load_entries(feed_config)[: _limit(feed_config)]:
-        item = build_item(entry, feed_config)
+        item = build_item(entry, feed_config, previous)
         if item is not None:
             items.append(item)
     LOGGER.info("%s 得到 %d 条", feed_config.source, len(items))
