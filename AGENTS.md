@@ -32,17 +32,20 @@
 
 - 图片只出现在 `images` 里，正文不内嵌图片语法。
 - 字段只增不改；改变字段语义必须在提交说明中写明。
-- 图片目录每轮重建，文件名由内容哈希决定，同一张图不会重复落盘。
+- 图片文件名由内容哈希决定，同一张图不会重复落盘；每轮结束按产物引用清理
+  目录（产物之外的图片一律删除），因此复用上一轮的图片不会留下孤儿文件。
+- `data/report.json` 是诊断附件，不属于阅读器契约：按订阅源记录条目数、
+  空正文、无图、无时间与整源异常，供 CI job summary 与排障使用。
 
 ## 模块职责
 
 | 文件 | 职责 |
 | --- | --- |
 | `config.py` | 参数常量与订阅源清单，不含抓取逻辑 |
-| `fetch.py` | 命令行入口、订阅源遍历、快照原子写入 |
+| `fetch.py` | 命令行入口、订阅源并发遍历、发布守门、快照原子写入 |
 | `newsfetch/feeds.py` | RSS 条目 → 产物条目（正文、图片、语言、时间） |
 | `newsfetch/http.py` | 会话、重试、反爬识别、浏览器升级 |
-| `newsfetch/browser.py` | Playwright 渲染，整轮共用一个 Chromium |
+| `newsfetch/browser.py` | Playwright 渲染，线程内共用一个 Chromium |
 | `newsfetch/extract.py` | 正文抽取（trafilatura 为主）与 Markdown 归一 |
 | `newsfetch/images.py` | 候选收集、分辨率筛选、去重、下载 |
 | `newsfetch/wechat.py` | 公众号文章（解析库 → 登录态浏览器） |
@@ -51,6 +54,8 @@
 | `newsfetch/dates.py` | 时间戳解析与时区处理 |
 | `newsfetch/text.py` | 编码识别、乱码修复、语种判断 |
 | `newsfetch/translate.py` | 可选英译中 |
+| `newsfetch/dedupe.py` | 跨源同一稿件的标题去重 |
+| `newsfetch/report.py` | 每轮分源统计与 CI 汇总渲染 |
 
 模块之间通过 `newsfetch/models.py` 中的数据结构（`NewsItem`、`Candidate`、`Article`）传递结果，
 不依赖隐式全局状态；`http` 可以向 `browser` 单向依赖，反向不允许。`NewsItem` 是
@@ -71,6 +76,24 @@
 - **图片门槛**：像素尺寸、宽高比、字节数三项同时达标才算正文大图；同一张图的不同
   分辨率按归一化 URL 去重，只保留最大的一份。阈值放在 `config.py`。公众号文章配图
   密集，用 `MAX_IMAGES_PER_WECHAT_ITEM` 单独放宽，其他来源仍用 `MAX_IMAGES_PER_ITEM`。
+
+- **回访原文的判定**：摘要被截断、正文过短、`rank()` 之后没有可用大图、没有发布
+  时间，四条命中任一即回访；如果首次下载后一张图都不达标，还会再回访一次（每篇
+  最多一次）。只判"候选列表为空"不够——RSS 摘要里的图标级 `<img>` 会让它永远
+  成立不了。
+- **发布守门**：整轮少于 `MIN_PUBLISH_ITEMS` 条，或不足线上快照的一半时直接失败
+  退出，不写快照。news 分支是孤儿分支 + force push，没有历史可回滚，坏数据覆盖
+  即永久丢失。`--feed` 调试入口不受此限制。
+- **并发**：订阅源之间用 `ThreadPoolExecutor` 并发（`FEED_WORKERS`，可用
+  `--workers` 调整）；Playwright 的 sync API 不能跨线程共享浏览器，因此浏览器
+  实例按线程隔离并登记，`close()` 统一回收。`pool.map` 保序，输出与串行一致。
+- **复用上一轮快照**：`data/previous-news.json`（CI 从 news 分支还原）命中时，链接
+  与标题都没变、正文够长、图片仍在本地且非空的条目直接复用，不再回访原文。
+  无图条目一律重抓，避免把缺陷固化。
+- **跨源去重**：链接去重之后，按归一化标题 + 相似度 ≥0.9 + 发布时间相差 48 小时内
+  合并同一稿件，保留有图、正文更长的一条，位置取首次出现。
+- **分类配额**：`MAX_ITEMS` 不是单纯按时间截断，而是先给每个分类
+  `MAX_ITEMS / 分类数` 的保底名额，富余名额再按时间补满。
 
 ## 设计与代码风格
 
