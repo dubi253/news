@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import threading
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -47,7 +48,11 @@ class RenderedPage:
     blocked: bool
 
 
-_STATE: dict[str, Any] = {"playwright": None, "browser": None}
+_LOCAL = threading.local()
+# 并发抓取时每个线程各自持有一个 Chromium（sync API 不能跨线程共享），
+# 这里登记全部实例，进程退出时统一回收。
+_INSTANCES: list[tuple[Any, Any]] = []
+_INSTANCES_LOCK = threading.Lock()
 _IMAGE_SCRIPT = """
 () => Array.from(document.images).map((img) => ({
   url: img.currentSrc || img.src || '',
@@ -67,17 +72,22 @@ def available() -> bool:
 
 
 def _shared_browser() -> Any:
-    """惰性启动并复用共享的 Chromium。"""
-    if _STATE["browser"] is not None:
-        return _STATE["browser"]
+    """惰性启动并复用当前线程的 Chromium。"""
+    browser = getattr(_LOCAL, "browser", None)
+    if browser is not None:
+        return browser
     from playwright.sync_api import sync_playwright
 
-    _STATE["playwright"] = sync_playwright().start()
-    _STATE["browser"] = _STATE["playwright"].chromium.launch(
+    playwright = sync_playwright().start()
+    browser = playwright.chromium.launch(
         headless=True,
         args=["--disable-http2", "--disable-dev-shm-usage"],
     )
-    return _STATE["browser"]
+    _LOCAL.playwright = playwright
+    _LOCAL.browser = browser
+    with _INSTANCES_LOCK:
+        _INSTANCES.append((playwright, browser))
+    return browser
 
 
 def _collect_images(page: Any) -> tuple[ImageRef, ...]:
@@ -222,18 +232,18 @@ def render_persistent(
 
 
 def close() -> None:
-    """释放共享浏览器；进程退出前调用一次即可。"""
-    browser = _STATE.get("browser")
-    if browser is not None:
+    """释放所有线程的共享浏览器；进程退出前调用一次即可。"""
+    with _INSTANCES_LOCK:
+        instances = list(_INSTANCES)
+        _INSTANCES.clear()
+    for playwright, browser in instances:
         try:
             browser.close()
         except Exception:  # noqa: BLE001 - 退出阶段无需处理
             LOGGER.debug("close browser failed")
-    playwright = _STATE.get("playwright")
-    if playwright is not None:
         try:
             playwright.stop()
         except Exception:  # noqa: BLE001
             LOGGER.debug("stop playwright failed")
-    _STATE["browser"] = None
-    _STATE["playwright"] = None
+    _LOCAL.browser = None
+    _LOCAL.playwright = None
