@@ -16,11 +16,13 @@ import os
 import shutil
 import tempfile
 from collections.abc import Sequence
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 
 from config import (
     DATA_DIR,
+    FEED_WORKERS,
     FEEDS,
     IMAGE_DIR,
     MAX_ITEMS,
@@ -73,23 +75,44 @@ def write_snapshot(items: Sequence[NewsItem]) -> None:
     os.replace(temporary_path, OUTPUT_PATH)
 
 
-def collect(feeds: Sequence[FeedConfig]) -> tuple[list[NewsItem], dict[str, str]]:
-    """抓取全部订阅源并按链接去重。
+def _fetch_one(feed: FeedConfig) -> tuple[list[NewsItem], str]:
+    """抓取单个订阅源；异常只记在本源上，不中断整轮抓取。"""
+    try:
+        return fetch_feed(feed), ""
+    except Exception as exc:
+        # 订阅源互相独立：单个源的任何失败都不应中断整轮抓取，
+        # LOGGER.exception 记录完整堆栈便于事后定位。
+        LOGGER.exception("订阅源抓取异常: %s", feed.source)
+        return [], f"{type(exc).__name__}: {exc}"
+
+
+def collect(
+    feeds: Sequence[FeedConfig], workers: int = FEED_WORKERS
+) -> tuple[list[NewsItem], dict[str, str]]:
+    """并发抓取全部订阅源，按链接去重后返回。
+
+    订阅源之间没有共享状态，瓶颈是网络等待，因此按源并发；线程内复用各自的
+    HTTP 会话与浏览器实例。``pool.map`` 保序，结果与串行抓取一致。
+
+    Args:
+        feeds: 要抓取的订阅源。
+        workers: 并发线程数，1 表示串行。
 
     Returns:
         去重后的条目，以及抓取失败的订阅源到异常简述的映射。
     """
+    if workers > 1 and len(feeds) > 1:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            results = list(pool.map(_fetch_one, feeds))
+    else:
+        results = [_fetch_one(feed) for feed in feeds]
+
     items: list[NewsItem] = []
     seen: set[str] = set()
     errors: dict[str, str] = {}
-    for feed in feeds:
-        try:
-            feed_items = fetch_feed(feed)
-        except Exception as exc:
-            # 订阅源互相独立：单个源的任何失败都不应中断整轮抓取，
-            # LOGGER.exception 记录完整堆栈便于事后定位。
-            LOGGER.exception("订阅源抓取异常: %s", feed.source)
-            errors[feed.source] = f"{type(exc).__name__}: {exc}"
+    for feed, (feed_items, error) in zip(feeds, results, strict=True):
+        if error:
+            errors[feed.source] = error
             continue
         for item in feed_items:
             link = str(item["link"])
@@ -161,6 +184,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="只抓取来源名或地址包含该关键字的订阅源，可重复",
     )
     parser.add_argument("--verbose", action="store_true", help="输出调试日志")
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=FEED_WORKERS,
+        metavar="N",
+        help="订阅源并发数，1 表示串行（默认 %(default)s）",
+    )
     return parser
 
 
@@ -175,7 +205,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     feeds = select_feeds(args.feed)
     reset_image_dir()
     try:
-        items, errors = collect(feeds)
+        items, errors = collect(feeds, workers=max(1, args.workers))
     finally:
         browser.close()
 

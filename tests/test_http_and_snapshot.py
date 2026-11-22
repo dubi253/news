@@ -1,6 +1,8 @@
 """HTTP 层与快照输出测试。"""
 
 import json
+import threading
+import time
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -10,6 +12,20 @@ import fetch
 from config import FeedConfig
 from newsfetch import http
 from newsfetch.models import NewsItem
+
+
+def _entry(feed: FeedConfig) -> NewsItem:
+    """一条满足 NewsItem 契约的最小条目，供并发/去重相关测试复用。"""
+    return {
+        "category": "a",
+        "source": feed.source,
+        "title": f"标题-{feed.source}",
+        "language": "zh",
+        "published": "",
+        "link": f"https://a.test/{feed.source}",
+        "content": "正文",
+        "images": [],
+    }
 
 
 class BlockDetectionTests(unittest.TestCase):
@@ -99,6 +115,38 @@ class SnapshotTests(unittest.TestCase):
             items, errors = fetch.collect(feeds)
         self.assertEqual(items, [])
         self.assertEqual(errors, {"A": "RuntimeError: boom"})
+
+    def test_feeds_are_fetched_concurrently(self):
+        # 两个源必须同时进入抓取，否则 barrier 超时（串行时第二个永远等不到）。
+        barrier = threading.Barrier(2, timeout=5)
+
+        def fake_fetch(feed):
+            barrier.wait()
+            return [_entry(feed)]
+
+        feeds = (
+            FeedConfig("a", "A", "https://a.test/1"),
+            FeedConfig("a", "B", "https://a.test/2"),
+        )
+        with patch.object(fetch, "fetch_feed", side_effect=fake_fetch):
+            items, errors = fetch.collect(feeds, workers=2)
+
+        self.assertEqual(errors, {})
+        self.assertEqual([item["source"] for item in items], ["A", "B"])
+
+    def test_concurrent_collect_keeps_feed_order(self):
+        def fake_fetch(feed):
+            time.sleep(0.01 if feed.source == "A" else 0.03)
+            return [_entry(feed)]
+
+        feeds = (
+            FeedConfig("a", "A", "https://a.test/1"),
+            FeedConfig("a", "B", "https://a.test/2"),
+        )
+        with patch.object(fetch, "fetch_feed", side_effect=fake_fetch):
+            items, _ = fetch.collect(feeds, workers=2)
+
+        self.assertEqual([item["source"] for item in items], ["A", "B"])
 
 
 class QuotaSelectionTests(unittest.TestCase):

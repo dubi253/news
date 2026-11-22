@@ -40,6 +40,9 @@ TIMEOUT_SECONDS = 20
 BROWSER_TIMEOUT_MS = 30_000
 MAX_PER_FEED = 15
 MAX_ITEMS = 160
+# 订阅源之间的并发度。每个线程会各起一个 Chromium（约 150MB），
+# 4 个并发在 16GB runner 上留足余量，同时把 34 个源的串行等待压掉大半。
+FEED_WORKERS = 4
 # 整轮抓取少于该条数时说明多数订阅源已经失效（反爬、网络或解析故障），
 # 此时写快照会把线上好数据覆盖成残缺快照，直接失败退出更安全。
 MIN_PUBLISH_ITEMS = 60
