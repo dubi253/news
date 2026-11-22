@@ -380,6 +380,25 @@ class FeedPipelineTests(unittest.TestCase):
 
         self.assertEqual(download.call_args.args[2], MAX_IMAGES_PER_ITEM)
 
+    def test_unreachable_feed_raises_for_the_report(self):
+        # 返回空列表会被当成“今天没更新”，report 里看不出这个源已经挂了。
+        feed = FeedConfig("test", "Test", "https://example.com/feed", 1)
+        with (
+            patch.object(feeds.http, "get_bytes", return_value=None),
+            self.assertRaises(RuntimeError),
+        ):
+            feeds.fetch_feed(feed)
+
+    def test_feed_without_entries_raises(self):
+        feed = FeedConfig("test", "Test", "https://example.com/feed", 1)
+        response = Mock(content=b"<rss />")
+        with (
+            patch.object(feeds.http, "get_bytes", return_value=response),
+            patch.object(feeds.feedparser, "parse", return_value=Mock(entries=[])),
+            self.assertRaises(RuntimeError),
+        ):
+            feeds.fetch_feed(feed)
+
     def test_entry_without_title_or_link_is_skipped(self):
         feed = FeedConfig("test", "Test", "https://example.com/feed", 1)
         self.assertIsNone(feeds.build_item({"title": "", "link": "https://x.test/a"}, feed))
@@ -406,7 +425,12 @@ class FeedPipelineTests(unittest.TestCase):
         feed = FeedConfig("test", "Test", "https://example.com/feed", 1)
         with (
             patch.object(feeds.http, "get_bytes", return_value=response) as get_bytes,
-            patch.object(feeds.feedparser, "parse", return_value=Mock(entries=[])),
+            patch.object(
+                feeds.feedparser,
+                "parse",
+                return_value=Mock(entries=[{"title": "t", "link": "https://x.test/1"}]),
+            ),
+            patch.object(feeds, "build_item", return_value=None),
         ):
             feeds.fetch_feed(feed)
 

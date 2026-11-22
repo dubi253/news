@@ -43,17 +43,21 @@ def _limit(feed_config: FeedConfig) -> int:
 
 
 def _load_entries(feed_config: FeedConfig) -> list[Mapping[str, Any]]:
-    """读取订阅源条目；Google News 走单独的解析路径。"""
+    """读取订阅源条目；Google News 走单独的解析路径。
+
+    Raises:
+        RuntimeError: 订阅源请求失败或解析不出条目。抛出而不是返回空列表，
+            否则 report.json 里该源只是“0 条”，与正常无更新的源无法区分。
+    """
     if googlenews.is_google_news_feed(feed_config.url):
         return list(googlenews.fetch_entries(feed_config.url, _limit(feed_config)))
 
     response = http.get_bytes(feed_config.url, headers=FEED_HEADERS)
     if response is None:
-        return []
+        raise RuntimeError(f"订阅源请求失败: {feed_config.url}")
     parsed = feedparser.parse(response.content)
     if not parsed.entries:
-        LOGGER.warning("订阅源没有条目: %s", feed_config.url)
-        return []
+        raise RuntimeError(f"订阅源没有条目: {feed_config.url}")
     return list(parsed.entries)
 
 

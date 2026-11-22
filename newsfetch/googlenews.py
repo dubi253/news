@@ -84,14 +84,17 @@ def fetch_entries(feed_url: str, limit: int) -> list[dict[str, Any]]:
 
     Returns:
         形如 ``{"title", "link", "published"}`` 的条目列表；链接还原失败的条目被丢弃。
+
+    Raises:
+        RuntimeError: RSS 请求失败或解析不出条目——静默返回空列表会让 report
+            里这个源看起来只是“今天没更新”。
     """
     response = http.get_bytes(feed_url, headers=FEED_HEADERS)
     if response is None:
-        return []
+        raise RuntimeError(f"Google News 请求失败: {feed_url}")
     parsed = feedparser.parse(response.content)
     if not parsed.entries:
-        LOGGER.warning("Google News 无条目: %s", feed_url)
-        return []
+        raise RuntimeError(f"Google News 没有条目: {feed_url}")
 
     entries: list[dict[str, Any]] = []
     for entry in parsed.entries[:limit]:
