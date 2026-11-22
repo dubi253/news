@@ -144,6 +144,49 @@ class FeedPipelineTests(unittest.TestCase):
         # 产物字段必须与 NewsItem 契约一一对应，新增字段时同步改契约与本文档。
         self.assertEqual(set(item), set(NewsItem.__annotations__))
 
+    def test_entry_without_usable_image_revisits_article(self):
+        # 集微网 RSS 给的是够长的摘要 + 图标级 <img>：候选非空但没有正文大图，
+        # 而且没有 pubDate。按“rank 后为空”判断才会回访，补回图和发布时间。
+        entry = {
+            "title": "标题",
+            "link": "https://www.ijiwei.com/n/1",
+            "summary": "<p>" + "摘要" * 300 + '</p><img class="icon" src="/icon.png">',
+        }
+        fetched = Article(
+            content="完整正文" * 200,
+            candidates=(Candidate("http://img.example/hero.png"),),
+            url="https://www.ijiwei.com/n/1",
+            published="2026-11-21T11:32:14+08:00",
+        )
+        feed = FeedConfig("semiconductor", "集微网", "https://example.com/feed", 1)
+        with (
+            patch.object(feeds.article_fetcher, "fetch", return_value=fetched) as article_fetch,
+            patch.object(feeds.images, "download", return_value=[]),
+        ):
+            item = feeds.build_item(entry, feed)
+
+        article_fetch.assert_called_once()
+        assert item is not None
+        self.assertEqual(item["content"], "完整正文" * 200)
+        self.assertEqual(item["published"], "2026-11-21T11:32:14+08:00")
+
+    def test_complete_entry_is_not_refetched(self):
+        # 摘要够长、有大图、有时间：不必回访原文，否则每轮都要重抓一遍全站。
+        entry = {
+            "title": "标题",
+            "link": "https://publisher.example/a",
+            "summary": "<p>" + "正文" * 300 + '</p><img src="/hero.jpg">',
+            "published": "Mon, 16 Nov 2026 14:00:00 +0800",
+        }
+        feed = FeedConfig("test", "Test", "https://publisher.example/feed", 1)
+        with (
+            patch.object(feeds.article_fetcher, "fetch") as article_fetch,
+            patch.object(feeds.images, "download", return_value=[]),
+        ):
+            feeds.build_item(entry, feed)
+
+        article_fetch.assert_not_called()
+
     def test_wechat_entry_takes_publish_time_from_article(self):
         # rssbox 的公众号镜像只有一个标题，没有 pubDate，只能回原文取时间。
         entry = {

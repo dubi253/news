@@ -78,9 +78,15 @@ def build_item(entry: Mapping[str, Any], feed_config: FeedConfig) -> NewsItem | 
     candidates = _collect_candidates(entry, content_html, link)
     published = dates.published_time(entry, feed_config.timezone)
     truncated = extract.has_read_more_marker(content_html)
-    # 公众号镜像 RSS 不带 pubDate，必须回原文才能拿到发布时间。
-    needs_publish_time = not published and wechat.is_wechat_url(link)
-    if truncated or len(content) < MIN_ARTICLE_CHARS or not candidates or needs_publish_time:
+    # 回访原文的四种理由：摘要被截断、正文过短、没有可用大图、没有发布时间。
+    # 注意用 rank() 之后的结果判断“有没有图”——RSS 摘要里常带图标级 <img>，
+    # 候选非空并不代表有正文配图；公众号镜像不带 pubDate，也只有回原文才有时间。
+    if (
+        truncated
+        or len(content) < MIN_ARTICLE_CHARS
+        or not images.rank(candidates)
+        or not published
+    ):
         fetched = article_fetcher.fetch(link)
         if fetched.content and (truncated or len(fetched.content) > len(content)):
             content = fetched.content
