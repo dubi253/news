@@ -104,7 +104,16 @@ def detect_language(entry: Mapping[str, Any], value: str) -> str:
 
 
 def normalize_markdown(value: str, max_length: int) -> str:
-    """收敛多余空行并截断到约定长度。"""
+    """收敛多余空行，并在段落边界截断到约定长度。"""
     text = re.sub(r"[ \t]+\n", "\n", value or "")
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
-    return text[:max_length].strip()
+    if len(text) <= max_length:
+        return text
+    # 直接切会在句子中间截断，读者看到的是半句话；优先退到最近的段落边界，
+    # 其次退到最近的换行，都没有才硬切（超长单段）。
+    cut = text.rfind("\n\n", 0, max_length)
+    if cut < max_length // 2:
+        cut = text.rfind("\n", 0, max_length)
+    if cut < max_length // 2:
+        cut = max_length
+    return text[:cut].rstrip()

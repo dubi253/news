@@ -61,6 +61,20 @@ class TextTests(unittest.TestCase):
         self.assertEqual(text.detect_language({}, "English title"), "en")
         self.assertEqual(text.detect_language({"language": "en-US"}, "中文"), "en")
 
+    def test_truncation_stops_at_paragraph_boundary(self):
+        # 50000 字上限处若切在句子中间，读者看到的是半句话；应退到最近的段落边界。
+        paragraphs = [f"第{index}段：" + "正文" * 100 for index in range(200)]
+        content = "\n\n".join(paragraphs)
+        truncated = text.normalize_markdown(content, 5_000)
+
+        self.assertLessEqual(len(truncated), 5_000)
+        self.assertGreater(len(truncated), 2_500)
+        self.assertTrue(content.startswith(truncated))
+        self.assertTrue(truncated.endswith("正文"))
+
+    def test_short_text_is_not_truncated(self):
+        self.assertEqual(text.normalize_markdown("短正文\n\n第二段", 5_000), "短正文\n\n第二段")
+
 
 if __name__ == "__main__":
     unittest.main()
