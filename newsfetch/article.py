@@ -11,13 +11,34 @@ from __future__ import annotations
 
 import logging
 
+from bs4 import BeautifulSoup
+
 from config import MIN_ARTICLE_CHARS, MIN_IMAGE_HEIGHT, MIN_IMAGE_WIDTH
-from newsfetch import browser, extract, http, wechat
+from newsfetch import browser, dates, extract, http, wechat
 from newsfetch.models import Article, Candidate
 
 LOGGER = logging.getLogger("newsfetch.article")
 # 短于该长度的正文基本是验证页或占位页残留，直接丢弃。
 MIN_USABLE_CHARS = 80
+# 页面声明发布时间的 meta 值，按可靠性排序；WordPress 类 CMS 普遍带
+# article:published_time，比正文里“x小时前”的相对时间可靠。
+PUBLISHED_META_VALUES = frozenset({"article:published_time", "og:article:published_time"})
+
+
+def _published_from_html(html: str) -> str:
+    """从页面的 meta 或 <time> 标签解析发布时间，取不到时返回空串。"""
+    soup = BeautifulSoup(html or "", "lxml")
+    for meta in soup.find_all("meta"):
+        declared = {str(meta.get("property") or "").lower(), str(meta.get("name") or "").lower()}
+        if declared & PUBLISHED_META_VALUES:
+            parsed = dates.iso_time(meta.get("content"))
+            if parsed:
+                return parsed
+    for tag in soup.find_all("time"):
+        parsed = dates.iso_time(tag.get("datetime") or tag.get_text(strip=True))
+        if parsed:
+            return parsed
+    return ""
 
 
 def _rendered_candidates(page: browser.RenderedPage) -> list[Candidate]:
@@ -41,6 +62,8 @@ def fetch(url: str) -> Article:
     extracted = extract.extract_html(page.html, page.url)
     content = extracted.content
     candidates = [Candidate(image_url) for image_url in extracted.image_urls]
+    # 订阅源不带 pubDate 时（rssbox 镜像等），文章页的声明时间是唯一来源。
+    published = _published_from_html(page.html)
 
     if len(content) < MIN_ARTICLE_CHARS:
         rendered = browser.render(page.url, proxy=http.browser_proxy())
@@ -50,6 +73,7 @@ def fetch(url: str) -> Article:
                 content = rendered_extract.content
                 candidates = [Candidate(image_url) for image_url in rendered_extract.image_urls]
             candidates.extend(_rendered_candidates(rendered))
+            published = published or _published_from_html(rendered.html)
 
     if (
         len(content) < MIN_USABLE_CHARS
@@ -58,4 +82,4 @@ def fetch(url: str) -> Article:
     ):
         LOGGER.warning("正文不可用，放弃抓取 %s (%d 字)", url, len(content))
         content = ""
-    return Article(content=content, candidates=tuple(candidates), url=page.url)
+    return Article(content=content, candidates=tuple(candidates), url=page.url, published=published)
