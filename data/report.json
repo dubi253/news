@@ -1,0 +1,313 @@
+{
+  "updated": "2026-11-28T12:02:14.572872+00:00",
+  "count": 160,
+  "reused": 148,
+  "feeds": [
+    {
+      "source": "BBC World",
+      "category": "international",
+      "items": 10,
+      "empty_content": 0,
+      "no_images": 0,
+      "no_published": 0,
+      "error": ""
+    },
+    {
+      "source": "The Guardian World",
+      "category": "international",
+      "items": 5,
+      "empty_content": 0,
+      "no_images": 0,
+      "no_published": 0,
+      "error": ""
+    },
+    {
+      "source": "德国之声中文国际",
+      "category": "international",
+      "items": 8,
+      "empty_content": 0,
+      "no_images": 0,
+      "no_published": 0,
+      "error": ""
+    },
+    {
+      "source": "联合早报国际",
+      "category": "international",
+      "items": 8,
+      "empty_content": 0,
+      "no_images": 1,
+      "no_published": 0,
+      "error": ""
+    },
+    {
+      "source": "新华社新闻",
+      "category": "china",
+      "items": 10,
+      "empty_content": 0,
+      "no_images": 1,
+      "no_published": 0,
+      "error": ""
+    },
+    {
+      "source": "财富中文网",
+      "category": "china",
+      "items": 5,
+      "empty_content": 0,
+      "no_images": 2,
+      "no_published": 0,
+      "error": ""
+    },
+    {
+      "source": "联合早报中国",
+      "category": "china",
+      "items": 10,
+      "empty_content": 0,
+      "no_images": 4,
+      "no_published": 0,
+      "error": ""
+    },
+    {
+      "source": "人民日报",
+      "category": "china",
+      "items": 5,
+      "empty_content": 0,
+      "no_images": 5,
+      "no_published": 0,
+      "error": ""
+    },
+    {
+      "source": "澎湃新闻",
+      "category": "china",
+      "items": 5,
+      "empty_content": 0,
+      "no_images": 0,
+      "no_published": 0,
+      "error": ""
+    },
+    {
+      "source": "微信公众号-上海发布",
+      "category": "shanghai",
+      "items": 2,
+      "empty_content": 0,
+      "no_images": 0,
+      "no_published": 0,
+      "error": ""
+    },
+    {
+      "source": "微信公众号-地球知识局",
+      "category": "knowledge",
+      "items": 2,
+      "empty_content": 0,
+      "no_images": 0,
+      "no_published": 0,
+      "error": ""
+    },
+    {
+      "source": "微信公众号-星球研究所",
+      "category": "knowledge",
+      "items": 1,
+      "empty_content": 0,
+      "no_images": 0,
+      "no_published": 0,
+      "error": ""
+    },
+    {
+      "source": "微信公众号-环球科学",
+      "category": "knowledge",
+      "items": 2,
+      "empty_content": 0,
+      "no_images": 0,
+      "no_published": 0,
+      "error": ""
+    },
+    {
+      "source": "微信公众号-丁香医生",
+      "category": "knowledge",
+      "items": 2,
+      "empty_content": 0,
+      "no_images": 0,
+      "no_published": 1,
+      "error": ""
+    },
+    {
+      "source": "TechCrunch",
+      "category": "technology",
+      "items": 4,
+      "empty_content": 0,
+      "no_images": 0,
+      "no_published": 0,
+      "error": ""
+    },
+    {
+      "source": "Ars Technica",
+      "category": "technology",
+      "items": 5,
+      "empty_content": 0,
+      "no_images": 0,
+      "no_published": 0,
+      "error": ""
+    },
+    {
+      "source": "InfoQ 中文",
+      "category": "technology",
+      "items": 5,
+      "empty_content": 0,
+      "no_images": 0,
+      "no_published": 0,
+      "error": ""
+    },
+    {
+      "source": "微信公众号-GitHubDaily",
+      "category": "technology",
+      "items": 1,
+      "empty_content": 0,
+      "no_images": 0,
+      "no_published": 0,
+      "error": ""
+    },
+    {
+      "source": "MIT News - Artificial Intelligence",
+      "category": "ai",
+      "items": 4,
+      "empty_content": 0,
+      "no_images": 0,
+      "no_published": 0,
+      "error": ""
+    },
+    {
+      "source": "雷峰网 - AI",
+      "category": "ai",
+      "items": 4,
+      "empty_content": 0,
+      "no_images": 1,
+      "no_published": 0,
+      "error": ""
+    },
+    {
+      "source": "雷峰网 - 顶会专区",
+      "category": "ai",
+      "items": 3,
+      "empty_content": 0,
+      "no_images": 0,
+      "no_published": 0,
+      "error": ""
+    },
+    {
+      "source": "Semiconductor Engineering",
+      "category": "semiconductor",
+      "items": 5,
+      "empty_content": 0,
+      "no_images": 0,
+      "no_published": 0,
+      "error": ""
+    },
+    {
+      "source": "IEEE Spectrum - Semiconductors",
+      "category": "semiconductor",
+      "items": 5,
+      "empty_content": 0,
+      "no_images": 1,
+      "no_published": 0,
+      "error": ""
+    },
+    {
+      "source": "Semiconductor Digest",
+      "category": "semiconductor",
+      "items": 4,
+      "empty_content": 0,
+      "no_images": 4,
+      "no_published": 0,
+      "error": ""
+    },
+    {
+      "source": "Google News - 晶圆代工与存储器",
+      "category": "semiconductor",
+      "items": 4,
+      "empty_content": 0,
+      "no_images": 1,
+      "no_published": 0,
+      "error": ""
+    },
+    {
+      "source": "集微网",
+      "category": "semiconductor",
+      "items": 7,
+      "empty_content": 0,
+      "no_images": 3,
+      "no_published": 7,
+      "error": ""
+    },
+    {
+      "source": "微信公众号-半导体行业观察",
+      "category": "semiconductor",
+      "items": 6,
+      "empty_content": 0,
+      "no_images": 0,
+      "no_published": 0,
+      "error": ""
+    },
+    {
+      "source": "微信公众号-半导体芯闻",
+      "category": "semiconductor",
+      "items": 6,
+      "empty_content": 0,
+      "no_images": 0,
+      "no_published": 0,
+      "error": ""
+    },
+    {
+      "source": "微信公众号-芯榜上海",
+      "category": "semiconductor",
+      "items": 2,
+      "empty_content": 0,
+      "no_images": 0,
+      "no_published": 0,
+      "error": ""
+    },
+    {
+      "source": "雷峰网 - 芯片",
+      "category": "semiconductor",
+      "items": 5,
+      "empty_content": 0,
+      "no_images": 1,
+      "no_published": 0,
+      "error": ""
+    },
+    {
+      "source": "SemiWiki",
+      "category": "semiconductor",
+      "items": 2,
+      "empty_content": 0,
+      "no_images": 0,
+      "no_published": 0,
+      "error": ""
+    },
+    {
+      "source": "SemiAnalysis",
+      "category": "ai_infra",
+      "items": 5,
+      "empty_content": 0,
+      "no_images": 0,
+      "no_published": 0,
+      "error": ""
+    },
+    {
+      "source": "ServeTheHome",
+      "category": "ai_infra",
+      "items": 4,
+      "empty_content": 0,
+      "no_images": 0,
+      "no_published": 0,
+      "error": ""
+    },
+    {
+      "source": "Google News - Foundry and Memory",
+      "category": "semiconductor",
+      "items": 4,
+      "empty_content": 0,
+      "no_images": 0,
+      "no_published": 0,
+      "error": ""
+    }
+  ]
+}
